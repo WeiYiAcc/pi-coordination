@@ -1,0 +1,318 @@
+import * as fs from "node:fs/promises";
+import * as fsSync from "node:fs";
+import * as path from "node:path";
+import type {
+	CoordinationMessage,
+	CoordinationState,
+	EscalationRequest,
+	EscalationResponse,
+	FileReservation,
+	TUIMessage,
+} from "./types.js";
+
+export class FileBasedStorage {
+	constructor(private coordDir: string) {}
+
+	private async withLock<T>(lockName: string, fn: () => Promise<T>): Promise<T> {
+		const lockPath = path.join(this.coordDir, `${lockName}.lock`);
+		const maxRetries = 50;
+		const retryDelay = 100;
+
+		try {
+			fsSync.mkdirSync(this.coordDir, { recursive: true });
+		} catch {}
+
+		for (let i = 0; i < maxRetries; i++) {
+			try {
+				const fd = fsSync.openSync(lockPath, fsSync.constants.O_CREAT | fsSync.constants.O_EXCL | fsSync.constants.O_RDWR);
+				fsSync.closeSync(fd);
+				break;
+			} catch (err: unknown) {
+				if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+					await new Promise((r) => setTimeout(r, retryDelay));
+					if (i === maxRetries - 1) throw new Error(`Failed to acquire lock: ${lockName}`);
+				} else {
+					throw err;
+				}
+			}
+		}
+
+		try {
+			return await fn();
+		} finally {
+			try {
+				fsSync.unlinkSync(lockPath);
+			} catch {}
+		}
+	}
+
+	async initialize(): Promise<void> {
+		await fs.mkdir(path.join(this.coordDir, "messages"), { recursive: true });
+		await fs.mkdir(path.join(this.coordDir, "reservations"), { recursive: true });
+		await fs.mkdir(path.join(this.coordDir, "escalation-responses"), { recursive: true });
+		const tuiPath = path.join(this.coordDir, "tui-messages.jsonl");
+		const escPath = path.join(this.coordDir, "escalations.jsonl");
+		try {
+			await fs.access(tuiPath);
+		} catch {
+			await fs.writeFile(tuiPath, "");
+		}
+		try {
+			await fs.access(escPath);
+		} catch {
+			await fs.writeFile(escPath, "");
+		}
+	}
+
+	async getState(): Promise<CoordinationState> {
+		const content = await fs.readFile(path.join(this.coordDir, "state.json"), "utf-8");
+		return JSON.parse(content);
+	}
+
+	async setState(state: CoordinationState): Promise<void> {
+		await fs.writeFile(path.join(this.coordDir, "state.json"), JSON.stringify(state, null, 2));
+	}
+
+	async updateState(updates: Partial<CoordinationState>): Promise<void> {
+		await this.withLock("state", async () => {
+			const current = await this.getState();
+			await fs.writeFile(path.join(this.coordDir, "state.json"), JSON.stringify({ ...current, ...updates }, null, 2));
+		});
+	}
+
+	async addWorker(workerId: string, worker: import("./types.js").WorkerState): Promise<void> {
+		await this.withLock("state", async () => {
+			const current = await this.getState();
+			current.workers[workerId] = worker;
+			await fs.writeFile(path.join(this.coordDir, "state.json"), JSON.stringify(current, null, 2));
+		});
+	}
+
+	async updateContract(
+		itemName: string,
+		updater: (contract: import("./types.js").Contract | undefined) => import("./types.js").Contract | undefined,
+	): Promise<import("./types.js").Contract | undefined> {
+		return this.withLock("state", async () => {
+			const current = await this.getState();
+			const updated = updater(current.contracts[itemName]);
+			if (updated) {
+				current.contracts[itemName] = updated;
+			} else if (current.contracts[itemName]) {
+				delete current.contracts[itemName];
+			}
+			await fs.writeFile(path.join(this.coordDir, "state.json"), JSON.stringify(current, null, 2));
+			return updated;
+		});
+	}
+
+	async updateWorker(
+		workerId: string,
+		updater: (worker: import("./types.js").WorkerState | undefined) => import("./types.js").WorkerState | undefined,
+	): Promise<import("./types.js").WorkerState | undefined> {
+		return this.withLock("state", async () => {
+			const current = await this.getState();
+			const updated = updater(current.workers[workerId]);
+			if (updated) {
+				current.workers[workerId] = updated;
+			} else if (current.workers[workerId]) {
+				delete current.workers[workerId];
+			}
+			await fs.writeFile(path.join(this.coordDir, "state.json"), JSON.stringify(current, null, 2));
+			return updated;
+		});
+	}
+
+	async appendTUIMessage(msg: TUIMessage): Promise<void> {
+		await fs.appendFile(path.join(this.coordDir, "tui-messages.jsonl"), JSON.stringify(msg) + "\n");
+	}
+
+	async getTUIMessages(): Promise<TUIMessage[]> {
+		try {
+			const content = await fs.readFile(path.join(this.coordDir, "tui-messages.jsonl"), "utf-8");
+			return content.trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
+		} catch {
+			return [];
+		}
+	}
+
+	async appendEscalation(req: EscalationRequest): Promise<void> {
+		await fs.appendFile(path.join(this.coordDir, "escalations.jsonl"), JSON.stringify(req) + "\n");
+	}
+
+	async getEscalationResponse(id: string): Promise<EscalationResponse | null> {
+		try {
+			const content = await fs.readFile(path.join(this.coordDir, "escalation-responses", `${id}.json`), "utf-8");
+			return JSON.parse(content);
+		} catch {
+			return null;
+		}
+	}
+
+	async writeEscalationResponse(response: EscalationResponse): Promise<void> {
+		await fs.writeFile(
+			path.join(this.coordDir, "escalation-responses", `${response.id}.json`),
+			JSON.stringify(response),
+		);
+	}
+
+	async sendMessage(msg: CoordinationMessage): Promise<void> {
+		const filename = `${msg.timestamp}-${msg.id}.json`;
+		await fs.writeFile(path.join(this.coordDir, "messages", filename), JSON.stringify(msg));
+	}
+
+	async getMessages(filter?: { to?: string; since?: number }): Promise<CoordinationMessage[]> {
+		const dir = path.join(this.coordDir, "messages");
+		let files: string[];
+		try {
+			files = await fs.readdir(dir);
+		} catch {
+			return [];
+		}
+
+		const messages: CoordinationMessage[] = [];
+		for (const file of files.sort()) {
+			if (!file.endsWith(".json")) continue;
+			const content = await fs.readFile(path.join(dir, file), "utf-8");
+			const msg: CoordinationMessage = JSON.parse(content);
+
+			if (filter?.since && msg.timestamp < filter.since) continue;
+			if (filter?.to && msg.to !== filter.to && msg.to !== "all") continue;
+
+			messages.push(msg);
+		}
+		return messages;
+	}
+
+	async reserveFiles(
+		reservation: FileReservation,
+	): Promise<{ success: boolean; conflict?: FileReservation }> {
+		return this.withLock("reservations", async () => {
+			const active = await this.getActiveReservations();
+
+			for (const existing of active) {
+				if (existing.agent === reservation.agent) continue;
+				if (!existing.exclusive && !reservation.exclusive) continue;
+				if (this.patternsOverlap(existing.patterns, reservation.patterns)) {
+					return { success: false, conflict: existing };
+				}
+			}
+
+			await fs.writeFile(
+				path.join(this.coordDir, "reservations", `${reservation.id}.json`),
+				JSON.stringify(reservation),
+			);
+
+			return { success: true };
+		});
+	}
+
+	async checkReservation(filePath: string): Promise<FileReservation | null> {
+		const active = await this.getActiveReservations();
+		for (const res of active) {
+			if (this.matchesPatterns(filePath, res.patterns)) {
+				return res;
+			}
+		}
+		return null;
+	}
+
+	async getActiveReservations(): Promise<FileReservation[]> {
+		const dir = path.join(this.coordDir, "reservations");
+		let files: string[];
+		try {
+			files = await fs.readdir(dir);
+		} catch {
+			return [];
+		}
+
+		const now = Date.now();
+		const active: FileReservation[] = [];
+
+		for (const file of files) {
+			if (!file.endsWith(".json")) continue;
+			const content = await fs.readFile(path.join(dir, file), "utf-8");
+			const res: FileReservation = JSON.parse(content);
+			if (!res.releasedAt && res.expiresAt > now) {
+				active.push(res);
+			}
+		}
+
+		return active;
+	}
+
+	async releaseFiles(agentIdentity: string, _patterns: string[]): Promise<void> {
+		await this.withLock("reservations", async () => {
+			const dir = path.join(this.coordDir, "reservations");
+			let files: string[];
+			try {
+				files = await fs.readdir(dir);
+			} catch {
+				return;
+			}
+
+			for (const file of files) {
+				if (!file.endsWith(".json")) continue;
+				const filePath = path.join(dir, file);
+				const content = await fs.readFile(filePath, "utf-8");
+				const res: FileReservation = JSON.parse(content);
+				if (res.agent === agentIdentity && !res.releasedAt) {
+					res.releasedAt = Date.now();
+					await fs.writeFile(filePath, JSON.stringify(res));
+				}
+			}
+		});
+	}
+
+	async updateProgress(content: string): Promise<void> {
+		await fs.writeFile(path.join(this.coordDir, "PROGRESS.md"), content);
+	}
+
+	async getProgress(): Promise<string | null> {
+		try {
+			return await fs.readFile(path.join(this.coordDir, "PROGRESS.md"), "utf-8");
+		} catch {
+			return null;
+		}
+	}
+
+	private patternsOverlap(a: string[], b: string[]): boolean {
+		for (const pa of a) {
+			for (const pb of b) {
+				if (pa === pb) return true;
+				if (this.simpleMatch(pa, pb) || this.simpleMatch(pb, pa)) return true;
+			}
+		}
+		return false;
+	}
+
+	private matchesPatterns(filePath: string, patterns: string[]): boolean {
+		for (const pattern of patterns) {
+			if (this.simpleMatch(filePath, pattern)) return true;
+		}
+		return false;
+	}
+
+	private simpleMatch(str: string, pattern: string): boolean {
+		if (str === pattern) return true;
+
+		if (pattern.endsWith("/**")) {
+			const base = pattern.slice(0, -3);
+			return str === base || str.startsWith(base + "/");
+		}
+
+		if (pattern.endsWith("/*")) {
+			const base = pattern.slice(0, -2);
+			if (!str.startsWith(base + "/")) return false;
+			const rest = str.slice(base.length + 1);
+			return !rest.includes("/");
+		}
+
+		if (pattern.includes("*")) {
+			const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+			const regex = new RegExp("^" + escaped.replace(/\\\*/g, ".*") + "$");
+			return regex.test(str);
+		}
+
+		return str.startsWith(pattern + "/") || pattern.startsWith(str + "/");
+	}
+}
