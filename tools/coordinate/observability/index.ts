@@ -81,7 +81,7 @@ export function createWorkerObservability(
 	})(trace, dir, workingDir, actor, actorType);
 }
 
-export { EventEmitter } from "./events.js";
+export { EventEmitter, type EventListener } from "./events.js";
 export { SpanTracer } from "./spans.js";
 export { SnapshotManager } from "./snapshots.js";
 export { DecisionLogger } from "./decisions.js";

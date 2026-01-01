@@ -28,6 +28,9 @@ import {
 import type { CoordinationState, CoordinationEvent, WorkerStateFile, WorkerStatus, CoordinationStatus, PipelinePhase, PhaseResult, CostState } from "./types.js";
 import type { ReviewResult } from "./phases/review.js";
 import { ObservabilityContext } from "./observability/index.js";
+import { validateCoordination } from "./validation/index.js";
+import type { ValidationResult } from "./validation/types.js";
+import { createStreamingValidator, type StreamingValidator } from "./validation/streaming.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -66,6 +69,7 @@ interface CoordinationDetails {
 		fixCycle: number;
 	};
 	cost?: CostState;
+	validation?: ValidationResult;
 }
 
 type OnUpdateCallback = (partial: AgentToolResult<CoordinationDetails>) => void;
@@ -85,6 +89,8 @@ const CoordinateParams = Type.Object({
 		hard: Type.Number({ description: "Cost threshold to abort ($)", default: 10.0 }),
 	})),
 	pauseOnCostThreshold: Type.Optional(Type.Boolean({ description: "Block and ask user when pause threshold is hit (default: false)" })),
+	validate: Type.Optional(Type.Boolean({ description: "Run validation after completion (default: false)" })),
+	validateStream: Type.Optional(Type.Boolean({ description: "Stream invariant warnings in real-time (default: false)" })),
 });
 
 function buildCoordinatorTask(
@@ -343,6 +349,24 @@ const factory: CustomToolFactory = (pi) => {
 				},
 			});
 
+			let streamingValidator: StreamingValidator | null = null;
+			let unsubscribeStreaming: (() => void) | null = null;
+
+			if (params.validateStream) {
+				streamingValidator = createStreamingValidator(
+					(invariant, message) => {
+						console.warn(`[VALIDATION WARNING] ${invariant}: ${message}`);
+					},
+					(invariant, message) => {
+						console.error(`[VALIDATION ERROR] ${invariant}: ${message}`);
+					},
+				);
+				unsubscribeStreaming = obs.events.subscribe((event) => {
+					streamingValidator?.onEvent(event);
+				});
+				streamingValidator.start();
+			}
+
 			const pipelineContext: PipelineContext = {
 				pi,
 				storage,
@@ -595,10 +619,6 @@ const factory: CustomToolFactory = (pi) => {
 					}
 				}
 
-				const summaryWithLog = logFilePath
-					? `${summary}\n\nLog saved to: ${logFilePath}`
-					: summary;
-
 				await obs.events.emit({
 					type: "session_completed",
 					summary: {
@@ -614,10 +634,32 @@ const factory: CustomToolFactory = (pi) => {
 					},
 				});
 
+				let validationResult: ValidationResult | undefined;
+				if (params.validate) {
+					validationResult = await validateCoordination({
+						coordDir,
+						planPath,
+						planContent,
+						mode: "post-hoc",
+						strictness: "warn-soft-fatal-hard",
+						checkContent: true,
+					});
+
+					detailsWithPipeline.validation = validationResult;
+
+					if (validationResult.reportPath) {
+						summary = `${summary}\n\nValidation: ${validationResult.passed ? "PASSED" : "FAILED"}\nReport: ${validationResult.reportPath}`;
+					}
+				}
+
+				const finalSummary = logFilePath
+					? `${summary}\n\nLog saved to: ${logFilePath}`
+					: summary;
+
 				return {
-					content: [{ type: "text", text: summaryWithLog }],
+					content: [{ type: "text", text: finalSummary }],
 					details: detailsWithPipeline,
-					isError,
+					isError: isError || (validationResult ? !validationResult.passed : false),
 				};
 			} catch (err) {
 				await obs.errors.capture(err, {
@@ -653,6 +695,12 @@ const factory: CustomToolFactory = (pi) => {
 			} finally {
 				if (statusInterval) {
 					clearInterval(statusInterval);
+				}
+				if (streamingValidator) {
+					streamingValidator.stop();
+				}
+				if (unsubscribeStreaming) {
+					unsubscribeStreaming();
 				}
 				delete process.env.PI_ACTIVE_COORDINATION_DIR;
 				delete process.env.PI_COORDINATION_DIR;

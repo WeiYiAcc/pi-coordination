@@ -1,0 +1,17 @@
+{
+  "description": "Single worker with no dependencies - simplest coordination scenario",
+  "invariants": {
+    "session_lifecycle": { "expected": "pass" },
+    "worker_lifecycle": { "expected": "pass", "workers": 1 },
+    "contract_fulfillment": { "expected": "pass", "contracts": 0 },
+    "cost_accounting": { "expected": "pass" },
+    "reservation_integrity": { "expected": "pass" },
+    "causality_validity": { "expected": "pass" },
+    "phase_ordering": { "expected": "pass" },
+    "no_orphaned_resources": { "expected": "pass" }
+  },
+  "content": {
+    "files_expected": ["hello.ts"],
+    "min_files": 1
+  }
+}

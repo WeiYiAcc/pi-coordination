@@ -1,0 +1,24 @@
+{
+  "description": "Diamond dependency pattern: A -> B,C -> D. Tests contract signaling and waiting.",
+  "invariants": {
+    "session_lifecycle": { "expected": "pass" },
+    "worker_lifecycle": { "expected": "pass", "workers": 4 },
+    "contract_fulfillment": { 
+      "expected": "pass", 
+      "contracts": 3,
+      "notes": "A->B (User type), A->C (User type), B+C->D (service + validator)"
+    },
+    "cost_accounting": { "expected": "pass" },
+    "reservation_integrity": { "expected": "pass" },
+    "causality_validity": { 
+      "expected": "pass",
+      "notes": "Verify A completes before B,C start; B,C complete before D starts"
+    },
+    "phase_ordering": { "expected": "pass" },
+    "no_orphaned_resources": { "expected": "pass" }
+  },
+  "content": {
+    "files_expected": ["types.ts", "service.ts", "validator.ts", "index.ts"],
+    "min_files": 4
+  }
+}

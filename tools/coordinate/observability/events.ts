@@ -4,10 +4,13 @@ import * as path from "node:path";
 import type { PipelinePhase } from "../types.js";
 import type { ObservableEvent, BaseEvent, ActorType } from "./types.js";
 
+export type EventListener = (event: ObservableEvent) => void;
+
 export class EventEmitter {
 	private spanStack: string[] = [];
 	private eventCount = 0;
 	private _currentPhase: PipelinePhase = "coordinator";
+	private listeners: EventListener[] = [];
 
 	constructor(
 		private coordDir: string,
@@ -15,6 +18,14 @@ export class EventEmitter {
 		private actorType: ActorType,
 		private traceId: string,
 	) {}
+
+	subscribe(listener: EventListener): () => void {
+		this.listeners.push(listener);
+		return () => {
+			const idx = this.listeners.indexOf(listener);
+			if (idx >= 0) this.listeners.splice(idx, 1);
+		};
+	}
 
 	setPhase(phase: PipelinePhase): void {
 		this._currentPhase = phase;
@@ -47,6 +58,12 @@ export class EventEmitter {
 			path.join(this.coordDir, "events.jsonl"),
 			JSON.stringify(fullEvent) + "\n",
 		);
+
+		for (const listener of this.listeners) {
+			try {
+				listener(fullEvent);
+			} catch {}
+		}
 
 		return eventId;
 	}

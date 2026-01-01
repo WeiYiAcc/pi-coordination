@@ -1,0 +1,20 @@
+{
+  "description": "Two workers modifying same file - tests reservation conflict handling",
+  "invariants": {
+    "session_lifecycle": { "expected": "pass" },
+    "worker_lifecycle": { "expected": "pass", "workers": 2 },
+    "contract_fulfillment": { "expected": "pass" },
+    "cost_accounting": { "expected": "pass" },
+    "reservation_integrity": { 
+      "expected": "pass",
+      "notes": "Worker B should wait for A to release shared.ts reservation"
+    },
+    "causality_validity": { "expected": "pass" },
+    "phase_ordering": { "expected": "pass" },
+    "no_orphaned_resources": { "expected": "pass" }
+  },
+  "content": {
+    "files_expected": ["shared.ts"],
+    "min_files": 1
+  }
+}

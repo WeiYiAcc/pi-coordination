@@ -13,6 +13,7 @@ Multi-agent coordination system for [pi](https://github.com/badlogic/pi-mono). E
 - **Real-time TUI**: Phase timeline, worker status, and event stream
 - **Coordination Logs**: Comprehensive markdown logs with executive summary
 - **Full Observability**: Events, spans, causality tracking, snapshots, structured errors
+- **Validation Layer**: Invariant checking, content validation, streaming warnings, markdown reports
 
 ## Installation
 
@@ -59,7 +60,9 @@ coordinate({
     warn: 1.0,                 // Cost threshold for warning ($)
     pause: 5.0,                // Cost threshold to pause and confirm ($)
     hard: 10.0                 // Cost threshold to abort ($)
-  }
+  },
+  validate: true,              // Run validation after completion
+  validateStream: true         // Stream invariant warnings in real-time
 })
 ```
 
@@ -241,6 +244,100 @@ The coordination system includes comprehensive observability for debugging, repl
 
 All events and spans share a `traceId` for session-wide correlation. Workers receive the trace ID via `PI_TRACE_ID` environment variable, enabling cross-process tracing.
 
+## Validation
+
+The validation layer provides production-grade testing of coordination sessions by checking invariants and generating reports.
+
+### Usage
+
+**Post-hoc validation (after coordination):**
+```typescript
+coordinate({
+  plan: "./plan.md",
+  agents: ["worker", "worker"],
+  validate: true  // Run full validation after completion
+})
+```
+
+**Real-time streaming validation:**
+```typescript
+coordinate({
+  plan: "./plan.md",
+  agents: ["worker", "worker"],
+  validateStream: true  // Stream warnings during execution
+})
+```
+
+**Standalone CLI:**
+```bash
+# Validate an existing coordination session
+validate-coord ~/.pi/sessions/default/coordination/abc123
+
+# With plan for semantic validation
+validate-coord ./my-coord-dir --plan ./plan.md
+
+# Output as JSON
+validate-coord ./my-coord-dir --json
+```
+
+### Invariants Checked
+
+| Invariant | Category | Description |
+|-----------|----------|-------------|
+| Session Lifecycle | Hard | Exactly one session_started and session_completed |
+| Worker Lifecycle | Hard | All spawned workers started and completed/failed |
+| Contract Fulfillment | Hard | All contracts with waiters were signaled and received |
+| Cost Accounting | Soft | Costs sum correctly across phases and workers |
+| Reservation Integrity | Hard | All reservations granted were released, no conflicts |
+| Causality Validity | Soft | All causal links reference valid events, no cycles |
+| Phase Ordering | Hard | Phases execute in correct order without overlap |
+| No Orphaned Resources | Soft | All created resources were properly released |
+| Content Validation | Soft | Expected files exist and have content |
+
+**Strictness levels:**
+- `fatal-all`: Fail on any invariant violation
+- `warn-soft-fatal-hard`: Warn on soft, fail on hard (default)
+- `advisory`: Report only, never fail
+
+### Streaming Validation
+
+When `validateStream: true`, real-time checks run during coordination:
+
+```
+[VALIDATION WARNING] Worker Lifecycle: Worker abc123 spawned 30s ago but never started
+[VALIDATION WARNING] Contract Fulfillment: worker-B waiting for contract user-type for 60s
+[VALIDATION ERROR] Phase Ordering: Phase workers started before coordinator completed
+```
+
+### Validation Report
+
+After validation, a markdown report is saved to `{coordDir}/validation-report.md`:
+
+```markdown
+# Validation Report
+
+**Result:** PASS
+
+## Invariant Checks
+
+| Invariant | Category | Result | Details |
+|-----------|----------|--------|---------|
+| Session Lifecycle | hard | PASS | - |
+| Worker Lifecycle | hard | PASS | - |
+...
+
+## Coordinator Judgment
+
+**Passed:** Yes
+**Confidence:** medium
+
+## Session Statistics
+
+- **Duration:** 45.2s
+- **Total Cost:** $0.89
+- **Workers:** 3/3 completed
+```
+
 ## Files
 
 ```
@@ -263,16 +360,42 @@ tools/
 │   │   ├── scout.ts         # Scout phase (codebase analysis)
 │   │   ├── review.ts        # Review phase (code-reviewer)
 │   │   └── fix.ts           # Fix phase (spawn fix workers)
-│   └── observability/       # Observability system
-│       ├── index.ts         # ObservabilityContext (unified interface)
-│       ├── types.ts         # Event, span, error type definitions
-│       ├── events.ts        # EventEmitter with span stack
-│       ├── spans.ts         # SpanTracer for hierarchical timing
-│       ├── causality.ts     # CausalityTracker for cause-effect links
-│       ├── errors.ts        # ErrorTracker for structured errors
-│       ├── resources.ts     # ResourceTracker for lifecycle tracking
-│       ├── snapshots.ts     # SnapshotManager for state capture
-│       └── decisions.ts     # DecisionLogger for audit trails
+│   ├── observability/       # Observability system
+│   │   ├── index.ts         # ObservabilityContext (unified interface)
+│   │   ├── types.ts         # Event, span, error type definitions
+│   │   ├── events.ts        # EventEmitter with span stack and listeners
+│   │   ├── spans.ts         # SpanTracer for hierarchical timing
+│   │   ├── causality.ts     # CausalityTracker for cause-effect links
+│   │   ├── errors.ts        # ErrorTracker for structured errors
+│   │   ├── resources.ts     # ResourceTracker for lifecycle tracking
+│   │   ├── snapshots.ts     # SnapshotManager for state capture
+│   │   └── decisions.ts     # DecisionLogger for audit trails
+│   └── validation/          # Validation layer
+│       ├── index.ts         # Main exports
+│       ├── types.ts         # Validation type definitions
+│       ├── loader.ts        # Load observability data from coordDir
+│       ├── orchestrator.ts  # Main validation orchestrator
+│       ├── streaming.ts     # Real-time streaming validator
+│       ├── judge.ts         # Coordinator-as-judge for semantic validation
+│       ├── report.ts        # Markdown report generator
+│       ├── content.ts       # File content validation
+│       ├── invariants/      # Invariant checkers
+│       │   ├── index.ts     # All invariants registry
+│       │   ├── session.ts   # Session lifecycle
+│       │   ├── workers.ts   # Worker lifecycle
+│       │   ├── contracts.ts # Contract fulfillment
+│       │   ├── costs.ts     # Cost accounting
+│       │   ├── reservations.ts # Reservation integrity
+│       │   ├── causality.ts # Causality validity
+│       │   ├── phases.ts    # Phase ordering
+│       │   └── resources.ts # No orphaned resources
+│       └── fixtures/        # Test fixtures
+│           ├── minimal/     # Single worker, no deps
+│           ├── diamond/     # Diamond dependency pattern
+│           ├── conflict/    # File conflict scenario
+│           └── failure/     # Deliberate failure scenario
+├── validate-coord/          # Standalone validation CLI
+│   └── index.ts
 └── subagent/                # Shared agent utilities
     ├── agents.ts            # Agent discovery and configuration
     ├── render.ts            # Result rendering utilities

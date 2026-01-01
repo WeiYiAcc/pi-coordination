@@ -1,0 +1,25 @@
+{
+  "description": "Deliberate failure scenario - tests error capture and worker_failed events",
+  "invariants": {
+    "session_lifecycle": { "expected": "pass" },
+    "worker_lifecycle": { 
+      "expected": "pass",
+      "workers": 2,
+      "failed": 1,
+      "notes": "Worker B should fail due to malformed import"
+    },
+    "contract_fulfillment": { "expected": "pass" },
+    "cost_accounting": { "expected": "pass" },
+    "reservation_integrity": { "expected": "pass" },
+    "causality_validity": { "expected": "pass" },
+    "phase_ordering": { "expected": "pass" },
+    "no_orphaned_resources": { 
+      "expected": "pass",
+      "notes": "Failed worker resources should still be cleaned up"
+    }
+  },
+  "errors": {
+    "expected_categories": ["worker_crash"],
+    "min_errors": 1
+  }
+}
