@@ -1,0 +1,71 @@
+# Changelog
+
+All notable changes to pi-coordination.
+
+---
+
+## 2025-01-01
+
+### Added
+- **Validation layer** with 9 invariant checkers (session, worker, contract, cost, reservation, causality, phase, resources, content)
+- Real-time streaming validator with timeout detection
+- Markdown report generation at `{coordDir}/validation-report.md`
+- Standalone `validate-coord` CLI for post-hoc analysis
+- `validate` and `validateStream` parameters for coordinate tool
+
+### Changed
+- Integrated CustomToolContext API (`abort`, `hasQueuedMessages`, updated signature)
+- `abort()` now called when hard cost threshold exceeded
+- Streaming validation warnings suppressed when user has queued input
+
+### Fixed
+- EventEmitter `emit()` type inference - changed generic parameter from `T extends ObservableEvent` to `T extends EventType` with proper payload extraction
+- Graceful handling of malformed JSON in observability data loader
+
+---
+
+## 2024-12-31
+
+### Added
+- **Observability system** with events, spans, causality tracking, structured errors
+- Event streaming with `EventEmitter.subscribe()` for real-time listeners
+- Span tracing with hierarchical timing
+- Causality tracker for cause-effect relationships
+- Resource lifecycle tracking
+- Snapshot manager for state capture
+- Decision logger for audit trails
+
+---
+
+## 2024-12-30
+
+### Added
+- **Multi-phase pipeline** with scout, coordinator, workers, review, fixes phases
+- Review/fix loop with configurable max cycles and stuck detection
+- Cost controls with warn/pause/hard thresholds
+- Checkpointing system for pipeline state recovery
+- Progress document generation
+
+### Changed
+- Coordination now runs through pipeline phases instead of direct execution
+
+---
+
+## 2024-12-29
+
+### Added
+- Automatic coordination log generation (`coordination-log-*.md`)
+- Enhanced TUI with phase timeline, worker status, event stream
+- Cost milestone tracking in events
+
+---
+
+## 2024-12-28
+
+### Added
+- **Initial release** of multi-agent coordination system
+- Coordinator agent with spawn_workers, create_contract, assign_files tools
+- Worker agents with contract signaling and reservation system
+- File reservation system for conflict prevention
+- Contract system for cross-worker dependencies
+- Basic event logging

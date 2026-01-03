@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
-import type { CustomAgentTool, CustomToolFactory } from "@mariozechner/pi-coding-agent";
+import type { CustomTool, CustomToolContext, CustomToolFactory } from "@mariozechner/pi-coding-agent";
 import { Container, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { discoverAgents, type AgentConfig } from "../subagent/agents.js";
@@ -208,14 +208,14 @@ spawn_workers({
 }
 
 const factory: CustomToolFactory = (pi) => {
-	const tool: CustomAgentTool<typeof CoordinateParams, CoordinationDetails> = {
+	const tool: CustomTool<typeof CoordinateParams, CoordinationDetails> = {
 		name: "coordinate",
 		label: "Coordinate",
 		description:
 			"Start multi-agent coordination session. Splits a plan across parallel workers, manages dependencies, and returns unified results. Saves a markdown log to the project directory (configurable via logPath parameter or PI_COORDINATION_LOG_DIR env var).",
 		parameters: CoordinateParams,
 
-		async execute(_toolCallId, params, signal, onUpdate) {
+		async execute(_toolCallId, params, onUpdate, ctx, signal) {
 			const coordSessionId = randomUUID();
 			const sessionDir = process.env.PI_SESSION_DIR || path.join(os.homedir(), ".pi", "sessions", "default");
 			const coordDir = path.join(sessionDir, "coordination", coordSessionId);
@@ -355,10 +355,14 @@ const factory: CustomToolFactory = (pi) => {
 			if (params.validateStream) {
 				streamingValidator = createStreamingValidator(
 					(invariant, message) => {
-						console.warn(`[VALIDATION WARNING] ${invariant}: ${message}`);
+						if (!ctx.hasQueuedMessages()) {
+							console.warn(`[VALIDATION WARNING] ${invariant}: ${message}`);
+						}
 					},
 					(invariant, message) => {
-						console.error(`[VALIDATION ERROR] ${invariant}: ${message}`);
+						if (!ctx.hasQueuedMessages()) {
+							console.error(`[VALIDATION ERROR] ${invariant}: ${message}`);
+						}
 					},
 				);
 				unsubscribeStreaming = obs.events.subscribe((event) => {
@@ -377,6 +381,7 @@ const factory: CustomToolFactory = (pi) => {
 				signal,
 				onUpdate,
 				obs,
+				abort: () => ctx.abort(),
 			};
 
 			const makeDetails = (results: SingleResult[]): SubagentDetails => ({

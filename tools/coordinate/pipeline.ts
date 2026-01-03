@@ -45,6 +45,7 @@ export interface PipelineContext {
 	signal?: AbortSignal;
 	onUpdate?: (partial: AgentToolResult<unknown>) => void;
 	obs?: ObservabilityContext;
+	abort?: () => void;
 }
 
 export interface PipelineResult {
@@ -188,6 +189,7 @@ export async function checkCostThresholds(
 		await ctx.storage.appendEvent({ type: "cost_pause", total, timestamp: Date.now() });
 		await ctx.obs?.events.emit({ type: "cost_threshold_crossed", threshold: "hard", total });
 		ctx.pipelineState.exitReason = "cost_abort";
+		ctx.abort?.();
 		return "abort";
 	}
 

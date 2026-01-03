@@ -6,6 +6,15 @@ import type { ObservableEvent, BaseEvent, ActorType } from "./types.js";
 
 export type EventListener = (event: ObservableEvent) => void;
 
+type EventType = ObservableEvent["type"];
+
+type AutoFilledFields = "id" | "timestamp" | "traceId" | "spanId" | "parentSpanId" | "actor" | "actorType" | "causedBy";
+
+type EventPayload<T extends EventType> = Omit<
+	Extract<ObservableEvent, { type: T }>,
+	AutoFilledFields
+>;
+
 export class EventEmitter {
 	private spanStack: string[] = [];
 	private eventCount = 0;
@@ -35,8 +44,8 @@ export class EventEmitter {
 		return this._currentPhase;
 	}
 
-	async emit<T extends ObservableEvent>(
-		event: Omit<T, keyof BaseEvent> & { type: T["type"] },
+	async emit<T extends EventType>(
+		event: { type: T } & EventPayload<T>,
 		causedBy?: string,
 	): Promise<string> {
 		const eventId = `${this.actor.slice(0, 8)}-${++this.eventCount}`;
