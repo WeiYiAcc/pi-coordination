@@ -221,10 +221,22 @@ export function spawnWorkerProcess(
 	let tokenTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 	let currentTool: string | null = null;
 	let currentToolArgs: string | null = null;
+	let currentFile: string | null = null;
 	let recentTools: Array<{ tool: string; args: string; endMs: number }> = [];
 	let lastOutput = "";
 	let rawOutput = "";
 	let stdoutBuffer = "";
+
+	const extractFileFromArgs = (toolName: string, args: any): string | null => {
+		if (!args) return null;
+		if (args.path) return args.path;
+		if (args.file) return args.file;
+		if (toolName === "bash" && args.command) {
+			const match = args.command.match(/(?:cat|less|head|tail|vim|nano|code)\s+["']?([^\s"']+)/);
+			if (match) return match[1];
+		}
+		return null;
+	};
 
 	const updateWorkerProgress = (force = false) => {
 		const now = Date.now();
@@ -233,6 +245,7 @@ export function spawnWorkerProcess(
 		storage.updateWorkerState(workerId, (s) => ({
 			...s,
 			currentTool,
+			currentFile,
 			toolCount,
 			tokens,
 			durationMs: now - startTime,
@@ -257,6 +270,8 @@ export function spawnWorkerProcess(
 			toolCount += 1;
 			currentTool = event.toolName || null;
 			currentToolArgs = extractToolArgsPreview(event.toolArgs || event.args || {}) || null;
+			const toolArgs = event.toolArgs || event.args || {};
+			currentFile = extractFileFromArgs(event.toolName || "", toolArgs);
 			updateWorkerProgress();
 		}
 
@@ -273,6 +288,7 @@ export function spawnWorkerProcess(
 			}
 			currentTool = null;
 			currentToolArgs = null;
+			currentFile = null;
 			updateWorkerProgress();
 		}
 

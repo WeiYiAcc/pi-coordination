@@ -725,6 +725,12 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 			pendingAgents: pendingAgents || [],
 			deviations: state?.deviations?.map(d => d.description) || [],
 			startedAt: state?.startedAt || Date.now(),
+			pipeline: {
+				currentPhase: pipelineState.currentPhase,
+				phases: pipelineState.phases,
+				fixCycle: pipelineState.fixCycle,
+			},
+			cost: costState,
 		};
 	};
 
@@ -741,12 +747,12 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 				const events = await storage.getEvents();
 				onUpdate({
 					content: [{ type: "text", text: "coordinating..." }],
-					details: makeCoordDetails(result, state, workerStates, events, params.agents),
+					details: makeCoordDetails(result, state, workerStates, events, normalizeAgents(params.agents)),
 				});
 			}).catch(() => {
 				onUpdate({
 					content: [{ type: "text", text: "working..." }],
-					details: makeCoordDetails(result, undefined, undefined, undefined, params.agents),
+					details: makeCoordDetails(result, undefined, undefined, undefined, normalizeAgents(params.agents)),
 				});
 			});
 		}
@@ -810,7 +816,7 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 			if (onUpdate) {
 				onUpdate({
 					content: [{ type: "text", text: "coordinating..." }],
-					details: makeCoordDetails(lastCoordResult, state, workerStates, events, params.agents),
+					details: makeCoordDetails(lastCoordResult, state, workerStates, events, normalizeAgents(params.agents)),
 				});
 			}
 			emitProgress(state, workerStates);
@@ -926,7 +932,7 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 		const completedAt = Date.now();
 
 		const detailsWithPipeline: CoordinationDetails = {
-			...makeCoordDetails(coordinatorResult, finalState, workerStates, events, params.agents),
+			...makeCoordDetails(coordinatorResult, finalState, workerStates, events, normalizeAgents(params.agents)),
 			pipeline: {
 				currentPhase: pipelineState.currentPhase,
 				phases: pipelineState.phases,
