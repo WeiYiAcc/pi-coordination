@@ -4,11 +4,19 @@ Multi-agent coordination system for [pi](https://github.com/badlogic/pi-mono). E
 
 ## Features
 
-- **Multi-Phase Pipeline**: Scout -> Coordinator -> Workers -> Review -> Fixes -> Complete
-- **Parallel Execution**: Spawn multiple workers to execute plan steps simultaneously
+- **Multi-Phase Pipeline**: Scout -> Planner -> Coordinator -> Workers -> Review -> Fixes -> Complete
+- **Planner Phase**: Dedicated planning agent with self-review loop for task decomposition
+- **Task Queue Model**: Priority-based task distribution with dependencies and dynamic assignment
+- **Parallel Execution**: Spawn multiple workers to execute tasks simultaneously
+- **Worker Self-Review**: Each worker reviews their own code before marking complete
+- **Supervisor Loop**: Monitors workers for inactivity, sends nudges, restarts stuck workers
+- **Discovered Tasks**: Workers can add new tasks during implementation for planner review
+- **A2A Messaging**: Agent-to-agent communication for file negotiation and discovery sharing
 - **Dependency Management**: Pre-assign files and create contracts between workers
 - **Review Cycles**: Automated code review with fix iterations
 - **Cost Controls**: Configurable warn/pause/hard thresholds
+- **Async Mode**: Fire-and-forget coordination with completion notifications
+- **Artifacts + Truncation**: Full prompt/output JSONL artifacts with optional output truncation
 - **Checkpointing**: Save/restore at phase boundaries for resumable sessions
 - **Real-time TUI**: Phase timeline, worker status, and event stream
 - **Coordination Logs**: Comprehensive markdown logs with executive summary
@@ -21,7 +29,7 @@ Multi-agent coordination system for [pi](https://github.com/badlogic/pi-mono). E
 ./install.sh
 ```
 
-This creates symlinks from `~/.pi/agent/` to this repo, so changes here are reflected immediately.
+This creates symlinks at `~/.pi/agent/extensions/coordination` and `~/.pi/agent/agents/coordination/` so changes here are reflected immediately.
 
 To uninstall:
 ```bash
@@ -30,7 +38,7 @@ To uninstall:
 
 ## Requirements
 
-- pi (from pi-mono)
+- pi (from pi-mono) v0.35.0+ (extensions system)
 - Node.js 18+
 
 ## Usage
@@ -50,19 +58,41 @@ coordinate({
 coordinate({
   plan: "./plan.md",
   agents: ["worker", "worker"],
-  logPath: "./logs",           // Save log to ./logs/coordination-log-TIMESTAMP.md
-  resume: "workers-1234567",   // Resume from checkpoint ID
-  maxFixCycles: 3,             // Maximum review/fix cycles (default: 3)
-  sameIssueLimit: 2,           // Times same issue can recur before giving up
-  reviewModel: "claude-opus-4-20250514",  // Model for code review phase
-  checkTests: true,            // Whether reviewer should check for tests
+  logPath: "./logs",
+  resume: "workers-1234567",
+  maxFixCycles: 3,
+  sameIssueLimit: 2,
+  reviewModel: "claude-opus-4-20250514",
+  checkTests: true,
+  async: false,
+  asyncResultsDir: "/tmp/pi-async-coordination-results",
+  maxOutput: { lines: 200 },
   costThresholds: {
-    warn: 1.0,                 // Cost threshold for warning ($)
-    pause: 5.0,                // Cost threshold to pause and confirm ($)
-    hard: 10.0                 // Cost threshold to abort ($)
+    warn: 1.0,
+    pause: 5.0,
+    hard: 10.0
   },
-  validate: true,              // Run validation after completion
-  validateStream: true         // Stream invariant warnings in real-time
+  pauseOnCostThreshold: false,
+  validate: true,
+  validateStream: true,
+  v2: {
+    selfReview: {
+      enabled: true,
+      maxCycles: 5
+    },
+    supervisor: {
+      enabled: true,
+      nudgeThresholdMs: 180000,
+      restartThresholdMs: 300000,
+      maxRestarts: 2,
+      checkIntervalMs: 30000
+    },
+    planner: {
+      enabled: true,
+      humanCheckpoint: false,
+      maxSelfReviewCycles: 5
+    }
+  }
 })
 ```
 
@@ -75,22 +105,24 @@ You can also set `PI_COORDINATION_LOG_DIR` environment variable to change the de
 > Execute plan.md with 4 workers
 
 The coordinate tool will:
-1. Spawn a coordinator to analyze the plan
-2. Coordinator pre-assigns files and creates contracts
-3. Coordinator spawns workers with detailed handshake specs
-4. Workers execute in parallel, coordinating via contracts
-5. Code reviewer checks all changes (when integrated)
-6. Fix workers address any issues found
-7. TUI shows real-time progress
-8. Final summary shows completion status
+1. Scout analyzes codebase for context
+2. Planner decomposes plan into task graph with self-review
+3. Coordinator spawns workers from task queue
+4. Workers execute tasks in parallel with self-review before completion
+5. Supervisor monitors worker activity, nudges or restarts stuck workers
+6. Code reviewer checks all changes
+7. Fix workers address any issues found
+8. TUI shows real-time progress
+9. Final summary shows completion status
 
 ## Pipeline Phases
 
 | Phase | Description |
 |-------|-------------|
-| **scout** | Deep codebase analysis before coordination (provides context to workers) |
-| **coordinator** | Analyzes plan, assigns files, creates contracts, spawns workers |
-| **workers** | Parallel execution of plan steps |
+| **scout** | Deep codebase analysis before coordination (provides context to planner/workers) |
+| **planner** | Creates task graph from plan with self-review (optional, requires v2.planner.enabled) |
+| **coordinator** | Spawns workers from task queue, manages supervisor loop |
+| **workers** | Parallel execution of tasks with self-review |
 | **review** | Code reviewer checks all changes against plan goals |
 | **fixes** | Same workers fix issues found in review |
 | **complete** | All done, generate final report |
@@ -100,6 +132,8 @@ The coordinate tool will:
 | Tool | Description |
 |------|-------------|
 | `spawn_workers` | Spawn workers with specs, wait for completion |
+| `spawn_from_queue` | Spawn workers based on pending tasks from task queue |
+| `get_task_queue_status` | Get status of all tasks in the queue |
 | `assign_files` | Pre-assign files to workers before spawning |
 | `create_contract` | Define dependencies between workers |
 | `broadcast_deviation` | Notify workers when plan changes |
@@ -117,19 +151,65 @@ The coordinate tool will:
 | `release_files` | Release file reservations |
 | `signal_contract_complete` | Signal a contract is ready |
 | `wait_for_contract` | Block until contract is ready |
-| `complete_task` | Signal worker is done |
+| `complete_task` | Signal worker is done (triggers self-review if enabled) |
 | `report_deviation` | Report deviation from plan approach |
 | `read_plan` | Read the full implementation plan |
 | `send_message` | Send message to another agent |
 | `check_messages` | Check inbox for new messages |
 | `update_step` | Update current step being worked on |
 | `escalate_to_user` | Ask user a question |
+| `add_discovered_task` | Add a discovered task for planner review |
+| `share_discovery` | Share learnings with other workers |
+
+## Planner Tools
+
+| Tool | Description |
+|------|-------------|
+| `read_context` | Read scout context file without truncation (supports section filtering) |
+
+## Scout Context Format
+
+The scout outputs a structured context file for the planner with two sections:
+
+```markdown
+<file_map>
+/path/to/project
+├── src
+│   ├── components
+│   │   ├── Button.tsx *
+│   │   ├── Input.tsx * +
+│   │   └── ...
+│   └── index.ts +
+├── package.json
+└── README.md
+
+(* denotes files to be modified)
+(+ denotes file contents included below)
+</file_map>
+
+<file_contents>
+File: /path/to/project/src/components/Input.tsx
+```tsx
+export function Input() { ... }
+```
+
+File: /path/to/project/src/index.ts
+```ts
+export * from './components';
+```
+</file_contents>
+```
+
+The planner reads this context using the `read_context` tool:
+- `read_context({ path: "scout/main.md" })` - Full context
+- `read_context({ path: "scout/main.md", section: "file_map" })` - Just the file tree
+- `read_context({ path: "scout/main.md", section: "file_contents" })` - Just file contents
 
 ## TUI Display
 
 **Pipeline Timeline:**
 ```
-Pipeline: [scout] -> [coordinator] -> [workers] -> [review] -> [fixes] -> [complete]
+Pipeline: [scout] -> [planner] -> [coordinator] -> [workers] -> [review] -> [fixes] -> [complete]
 Current: workers
 Cost: $0.45 / $5.00 pause threshold
 ```
@@ -195,16 +275,22 @@ coordinate tool
     │
     ├── [Scout Phase] - Analyze codebase for context
     │
+    ├── [Planner Phase] - Decompose plan into task graph
+    │   ├── Receives scout context + plan
+    │   ├── Self-review loop before finalizing
+    │   ├── Creates tasks.json with dependencies
+    │   └── Starts background review for discovered tasks
+    │
     ├── [Coordinator Phase]
-    │   ├── Analyzes plan for dependencies
-    │   ├── Pre-assigns files via assign_files()
-    │   ├── Creates contracts between workers
-    │   └── Spawns workers with handshake specs
+    │   ├── Spawns workers from task queue
+    │   ├── Starts supervisor loop
+    │   └── Handles worker exits and restarts
     │
     ├── [Workers Phase] - Execute in parallel
-    │   ├── Use coordination tools
-    │   ├── Signal contracts when ready
-    │   └── Report deviations if needed
+    │   ├── Claim tasks from queue
+    │   ├── Self-review before completion
+    │   ├── Can discover new tasks
+    │   └── Signal contracts when ready
     │
     ├── [Review Phase] - Code reviewer checks changes
     │   └── Returns issues with file, line, severity
@@ -212,6 +298,44 @@ coordinate tool
     └── [Fix Phase] - Same workers fix their issues
         └── Repeat review/fix until clean or stuck
 ```
+
+## Task Queue
+
+Tasks are managed in a priority queue with dependencies:
+
+```typescript
+interface Task {
+  id: string;
+  description: string;
+  priority: number;        // 0=critical, 1=high, 2=medium, 3=low
+  status: TaskStatus;      // pending_review, pending, blocked, claimed, complete, failed, rejected
+  files?: string[];
+  dependsOn?: string[];
+  claimedBy?: string;
+  discoveredFrom?: string; // For discovered tasks
+}
+```
+
+Task status flow:
+- **Planner tasks**: pending -> claimed -> complete/failed
+- **Discovered tasks**: pending_review -> pending -> claimed -> complete/failed (or rejected)
+
+## Worker Self-Review
+
+Workers run a self-review pass before `complete_task` succeeds. The worker is prompted to review their changes with "fresh eyes" and fix any issues found. Only proceeds when "No issues found." is in the response.
+
+Configuration:
+- `PI_SELF_REVIEW_ENABLED`: Set to "false" to disable (default: "true")
+- `PI_MAX_SELF_REVIEW_CYCLES`: Max review cycles (default: 5)
+- `PI_SELF_REVIEW_SPEC_PATH`: Optional spec path to include in review prompt
+
+## Supervisor
+
+The supervisor monitors worker activity and intervenes when workers appear stuck:
+
+- **Nudge** (3 min inactive): Sends wrap_up message to worker
+- **Restart** (5 min inactive): Kills worker, releases task for retry
+- **Abandon** (max restarts exceeded): Marks task as failed
 
 ## Observability
 
@@ -238,7 +362,10 @@ The coordination system includes comprehensive observability for debugging, repl
 - **Reservation**: `reservation_requested`, `reservation_granted`, `reservation_denied`, `reservation_transferred`, `reservation_released`
 - **Review**: `review_started`, `review_completed`, `fix_started`, `fix_completed`
 - **Cost**: `cost_updated`, `cost_threshold_crossed`
-- **Other**: `message_sent`, `deviation_reported`, `deviation_broadcast`, `escalation_created`, `escalation_responded`, `checkpoint_saved`
+- **Task**: `task_claimed`, `task_completed`, `task_failed`, `task_discovered`, `task_reviewed`
+- **Self-Review**: `self_review_started`, `self_review_passed`, `self_review_limit_reached`
+- **Supervisor**: `worker_nudged`, `worker_restarting`, `worker_abandoned`
+- **A2A**: `a2a_message_sent`, `discovery_shared`
 
 ### Trace Correlation
 
@@ -255,7 +382,7 @@ The validation layer provides production-grade testing of coordination sessions 
 coordinate({
   plan: "./plan.md",
   agents: ["worker", "worker"],
-  validate: true  // Run full validation after completion
+  validate: true
 })
 ```
 
@@ -264,19 +391,14 @@ coordinate({
 coordinate({
   plan: "./plan.md",
   agents: ["worker", "worker"],
-  validateStream: true  // Stream warnings during execution
+  validateStream: true
 })
 ```
 
 **Standalone CLI:**
 ```bash
-# Validate an existing coordination session
 validate-coord ~/.pi/sessions/default/coordination/abc123
-
-# With plan for semantic validation
 validate-coord ./my-coord-dir --plan ./plan.md
-
-# Output as JSON
 validate-coord ./my-coord-dir --json
 ```
 
@@ -294,121 +416,92 @@ validate-coord ./my-coord-dir --json
 | No Orphaned Resources | Soft | All created resources were properly released |
 | Content Validation | Soft | Expected files exist and have content |
 
-**Strictness levels:**
-- `fatal-all`: Fail on any invariant violation
-- `warn-soft-fatal-hard`: Warn on soft, fail on hard (default)
-- `advisory`: Report only, never fail
+## Output Retrieval (Artifacts)
 
-### Streaming Validation
+Worker outputs are written to artifacts under the coordination directory. When previews are truncated, use the `coord_output` tool to fetch full output.
 
-When `validateStream: true`, real-time checks run during coordination:
-
-```
-[VALIDATION WARNING] Worker Lifecycle: Worker abc123 spawned 30s ago but never started
-[VALIDATION WARNING] Contract Fulfillment: worker-B waiting for contract user-type for 60s
-[VALIDATION ERROR] Phase Ordering: Phase workers started before coordinator completed
+```typescript
+coord_output({ ids: ["worker-04ea"] })
+coord_output({ ids: ["scout", "review"], coordDir: "/path/to/coordDir", format: "stripped" })
 ```
 
-### Validation Report
+## Async Mode
 
-After validation, a markdown report is saved to `{coordDir}/validation-report.md`:
+Async runs start a detached runner and return immediately. Completion is delivered via `coordination:complete` on the shared event bus and a result file in the async results directory.
 
-```markdown
-# Validation Report
+- Results directory: `/tmp/pi-async-coordination-results` (override with `asyncResultsDir`)
+- Durable status: `coordDir/async/status.json`
+- Logs: `coordination-log-*.md` saved to `coordDir` by default in async runs
 
-**Result:** PASS
+## Coordination Data Layout
 
-## Invariant Checks
-
-| Invariant | Category | Result | Details |
-|-----------|----------|--------|---------|
-| Session Lifecycle | hard | PASS | - |
-| Worker Lifecycle | hard | PASS | - |
-...
-
-## Coordinator Judgment
-
-**Passed:** Yes
-**Confidence:** medium
-
-## Session Statistics
-
-- **Duration:** 45.2s
-- **Total Cost:** $0.89
-- **Workers:** 3/3 completed
+```
+coordDir/
+├── tasks.json                    # Task queue
+├── state.json                    # CoordinationState
+├── cost.json                     # CostState
+├── events.jsonl                  # All coordination events
+├── progress.md                   # Human-readable progress
+├── discoveries.json              # Shared discoveries
+├── workers/                      # Per-worker state files
+│   └── {workerId}.json
+├── nudges/                       # Supervisor -> Worker nudges
+│   └── {workerId}.json
+├── a2a-messages/                 # Agent-to-agent messages
+│   └── {timestamp}-{id}.json
+├── scout/                        # Scout outputs
+├── artifacts/                    # Per-agent artifacts
+├── checkpoints/                  # Phase checkpoints
+└── traces/                       # Observability traces
 ```
 
 ## Files
 
 ```
+extensions/
+└── coordination/
+    ├── index.ts            # Main extension (coordinate + coord_output + async notify)
+    ├── coordinator.ts      # Coordinator-only tools
+    ├── worker.ts           # Worker tools + self-review hooks
+    └── planner.ts          # Planner tools (read_context)
+
 tools/
-├── coordinate/              # Main coordination tool
-│   ├── index.ts             # Tool entry point with TUI rendering
-│   ├── pipeline.ts          # Multi-phase pipeline orchestration
-│   ├── types.ts             # Type definitions
-│   ├── state.ts             # FileBasedStorage for shared state
-│   ├── log-generator.ts     # Coordination log generation
-│   ├── progress.ts          # Progress document generation
-│   ├── checkpoint.ts        # Phase-boundary checkpointing
-│   ├── coordinator-tools/   # Tools available to coordinator
-│   │   └── index.ts
-│   ├── worker-tools/        # Tools available to workers
-│   │   └── index.ts
-│   ├── worker-hooks/        # Hooks for worker file reservation
-│   │   └── reservation.ts
-│   ├── phases/              # Phase runners
-│   │   ├── scout.ts         # Scout phase (codebase analysis)
-│   │   ├── review.ts        # Review phase (code-reviewer)
-│   │   └── fix.ts           # Fix phase (spawn fix workers)
-│   ├── observability/       # Observability system
-│   │   ├── index.ts         # ObservabilityContext (unified interface)
-│   │   ├── types.ts         # Event, span, error type definitions
-│   │   ├── events.ts        # EventEmitter with span stack and listeners
-│   │   ├── spans.ts         # SpanTracer for hierarchical timing
-│   │   ├── causality.ts     # CausalityTracker for cause-effect links
-│   │   ├── errors.ts        # ErrorTracker for structured errors
-│   │   ├── resources.ts     # ResourceTracker for lifecycle tracking
-│   │   ├── snapshots.ts     # SnapshotManager for state capture
-│   │   └── decisions.ts     # DecisionLogger for audit trails
-│   └── validation/          # Validation layer
-│       ├── index.ts         # Main exports
-│       ├── types.ts         # Validation type definitions
-│       ├── loader.ts        # Load observability data from coordDir
-│       ├── orchestrator.ts  # Main validation orchestrator
-│       ├── streaming.ts     # Real-time streaming validator
-│       ├── judge.ts         # Coordinator-as-judge for semantic validation
-│       ├── report.ts        # Markdown report generator
-│       ├── content.ts       # File content validation
-│       ├── invariants/      # Invariant checkers
-│       │   ├── index.ts     # All invariants registry
-│       │   ├── session.ts   # Session lifecycle
-│       │   ├── workers.ts   # Worker lifecycle
-│       │   ├── contracts.ts # Contract fulfillment
-│       │   ├── costs.ts     # Cost accounting
-│       │   ├── reservations.ts # Reservation integrity
-│       │   ├── causality.ts # Causality validity
-│       │   ├── phases.ts    # Phase ordering
-│       │   └── resources.ts # No orphaned resources
-│       └── fixtures/        # Test fixtures
-│           ├── minimal/     # Single worker, no deps
-│           ├── diamond/     # Diamond dependency pattern
-│           ├── conflict/    # File conflict scenario
-│           └── failure/     # Deliberate failure scenario
-├── validate-coord/          # Standalone validation CLI
-│   └── index.ts
-└── subagent/                # Shared agent utilities
-    ├── agents.ts            # Agent discovery and configuration
-    ├── render.ts            # Result rendering utilities
-    ├── runner.ts            # Agent process spawning
-    └── types.ts             # Shared type definitions
+├── coord-output/           # Read full outputs from coordDir/artifacts
+├── read-context/           # Read scout context without truncation
+├── coordinate/             # Coordination runtime
+│   ├── index.ts            # Tool entry point with TUI rendering
+│   ├── async-runner.ts     # Detached async runner
+│   ├── pipeline.ts         # Multi-phase pipeline orchestration
+│   ├── types.ts            # Type definitions
+│   ├── state.ts            # FileBasedStorage for shared state
+│   ├── task-queue.ts       # TaskQueueManager for task distribution
+│   ├── supervisor.ts       # Supervisor loop for stuck worker detection
+│   ├── nudge.ts            # Nudge protocol for supervisor -> worker
+│   ├── a2a.ts              # Agent-to-agent messaging
+│   ├── log-generator.ts    # Coordination log generation
+│   ├── progress.ts         # Progress document generation
+│   ├── checkpoint.ts       # Phase-boundary checkpointing
+│   ├── coordinator-tools/  # Coordinator tools
+│   ├── worker-tools/       # Worker tools
+│   ├── phases/             # Phase runners
+│   │   ├── scout.ts
+│   │   ├── planner.ts
+│   │   ├── review.ts
+│   │   └── fix.ts
+│   ├── observability/      # Observability system
+│   └── validation/         # Validation layer
+├── validate-coord/         # Standalone validation CLI
+└── subagent/               # Shared agent utilities
 
 agents/
-├── coordinator.md           # Coordinator agent definition
-└── worker.md                # Worker agent definition
+├── coordinator.md          # Coordinator agent definition
+├── worker.md               # Worker agent definition
+├── scout.md                # Scout agent definition
+└── planner.md              # Planner agent definition
 
 skills/
 └── coordination/
-    └── SKILL.md             # Skill documentation
+    └── SKILL.md            # Skill documentation
 ```
 
 ## License

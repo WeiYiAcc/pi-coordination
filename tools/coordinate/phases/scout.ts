@@ -1,14 +1,17 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { runSingleAgent } from "../../subagent/runner.js";
+import { runSingleAgent, type AgentRuntime } from "../../subagent/runner.js";
 import { discoverAgents } from "../../subagent/agents.js";
-import type { CustomToolAPI } from "@mariozechner/pi-coding-agent";
+import type { OutputLimits } from "../../subagent/types.js";
 
 export interface ScoutConfig {
 	depth: "shallow" | "deep";
 	outputDir: string;
 	maxFileSize: number;
 	model?: string;
+	outputLimits?: OutputLimits;
+	tokenBudget?: number;
+	agentName?: string;
 }
 
 export interface ScoutResult {
@@ -20,50 +23,99 @@ export interface ScoutResult {
 }
 
 export async function runScoutPhase(
-	pi: CustomToolAPI,
+	runtime: AgentRuntime,
 	_planPath: string,
 	planContent: string,
-	_coordDir: string,
+	coordDir: string,
 	config: ScoutConfig,
 	signal?: AbortSignal,
 ): Promise<ScoutResult> {
 	const startTime = Date.now();
-	const { agents } = discoverAgents(pi.cwd, "user");
+	const { agents } = discoverAgents(runtime.cwd, "user");
 
 	await fs.mkdir(config.outputDir, { recursive: true });
 
-	const task = `Analyze this implementation plan and the codebase to provide context for workers.
+	const tokenBudget = config.tokenBudget || 30000;
+
+	const task = `Analyze this implementation plan and the codebase to provide context for PLANNING task breakdown.
 
 ## Plan
 ${planContent}
 
 ## Output Requirements
-1. Main context document with architecture overview
-2. Key code snippets with file:line references for workers to reference
-3. File ownership suggestions (which files naturally group together)
-4. Patterns that workers should follow
 
-Save detailed output to: ${config.outputDir}/
+You MUST output a single file \`main.md\` with this EXACT structure:
 
-### Output Structure
-- Save \`main.md\` - Primary context document with overview
-- Save \`files/<name>.md\` - Detailed snippets for key files (if main.md would be too large)
-- Include actual code, not summaries`;
+\`\`\`markdown
+<file_map>
+/path/to/project
+├── src
+│   ├── components
+│   │   ├── Button.tsx *
+│   │   ├── Input.tsx * +
+│   │   └── ...
+│   ├── utils
+│   │   └── helpers.ts +
+│   └── index.ts * +
+├── package.json
+└── README.md
 
+(* denotes files to be modified based on the plan)
+(+ denotes file contents included below)
+</file_map>
+
+<file_contents>
+File: /path/to/project/src/components/Input.tsx
+\`\`\`tsx
+// Full file contents here
+\`\`\`
+
+File: /path/to/project/src/utils/helpers.ts
+\`\`\`ts
+// Full file contents here
+\`\`\`
+</file_contents>
+\`\`\`
+
+## File Selection
+
+Mark files in the tree with:
+- \`*\` - Files that will need modification based on the plan
+- \`+\` - Files whose FULL contents are included in <file_contents>
+
+Include full contents for:
+1. Files that need modification (marked with *)
+2. Type definitions and interfaces relevant to the plan
+3. Files with patterns workers should follow
+4. Configuration files affecting the implementation
+
+## Token Budget
+Target ~${tokenBudget} tokens. Prioritize:
+- Files marked for modification (*)
+- Type definitions and interfaces
+- Pattern examples
+- Configuration files
+
+If you cannot include all relevant files, note which ones were omitted.
+
+Save output to: ${config.outputDir}/main.md`;
+
+	const agentName = config.agentName || "coordination/scout";
 	const agentsWithOverride = config.model 
-		? agents.map(a => a.name === "scout" ? { ...a, model: config.model } : a)
+		? agents.map(a => a.name === agentName ? { ...a, model: config.model } : a)
 		: agents;
 
 	const result = await runSingleAgent(
-		pi,
+		runtime,
 		agentsWithOverride,
-		"scout",
+		agentName,
 		task,
-		pi.cwd,
+		runtime.cwd,
 		undefined,
 		signal,
 		undefined,
 		(results) => ({ mode: "single", results, agentScope: "user", projectAgentsDir: null }),
+		{ outputLimits: config.outputLimits, artifactsDir: path.join(coordDir, "artifacts"), artifactLabel: "scout" },
 	);
 
 	const contextPath = path.join(config.outputDir, "main.md");
