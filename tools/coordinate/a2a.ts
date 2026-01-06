@@ -6,10 +6,38 @@ import type { A2AMessage, A2APayload } from "./types.js";
 
 export class A2AManager {
 	private messagesDir: string;
+	private readMessagesPath: string;
 	private readMessages = new Set<string>();
 
 	constructor(private coordDir: string) {
 		this.messagesDir = path.join(coordDir, "a2a-messages");
+		this.readMessagesPath = path.join(coordDir, "a2a-read.json");
+		this.loadReadMessages();
+	}
+
+	private loadReadMessages(): void {
+		try {
+			if (fsSync.existsSync(this.readMessagesPath)) {
+				const data = fsSync.readFileSync(this.readMessagesPath, "utf-8");
+				const ids = JSON.parse(data);
+				if (Array.isArray(ids)) {
+					this.readMessages = new Set(ids);
+				}
+			}
+		} catch {
+			// Ignore errors, start with empty set
+		}
+	}
+
+	private async persistReadMessages(): Promise<void> {
+		try {
+			await fs.writeFile(
+				this.readMessagesPath,
+				JSON.stringify([...this.readMessages]),
+			);
+		} catch {
+			// Ignore write errors
+		}
 	}
 
 	async initialize(): Promise<void> {
@@ -82,6 +110,7 @@ export class A2AManager {
 		for (const id of messageIds) {
 			this.readMessages.add(id);
 		}
+		await this.persistReadMessages();
 	}
 
 	async getUnreadCount(agentId: string): Promise<number> {

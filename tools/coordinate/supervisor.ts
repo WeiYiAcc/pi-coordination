@@ -5,18 +5,12 @@ import type { SupervisorConfig } from "./types.js";
 import type { FileBasedStorage } from "./state.js";
 import { sendNudge } from "./nudge.js";
 import { TaskQueueManager } from "./task-queue.js";
+import type { WorkerHandle } from "./coordinator-tools/index.js";
 
-export interface WorkerHandle {
-	workerId: string;
-	identity: string;
-	pid: number;
-	proc: ChildProcess;
-	promise: Promise<number>;
-	taskId: string;
-}
+export type SupervisedWorkerHandle = WorkerHandle & { taskId: string };
 
 interface WorkerTracker {
-	handle: WorkerHandle;
+	handle: SupervisedWorkerHandle;
 	lastActivityAt: number;
 	nudgedAt?: number;
 	restartCount: number;
@@ -44,7 +38,7 @@ export class SupervisorLoop {
 		this.config = { ...DEFAULT_CONFIG, ...config };
 	}
 
-	start(handles: WorkerHandle[], signal?: AbortSignal): void {
+	start(handles: SupervisedWorkerHandle[], signal?: AbortSignal): void {
 		for (const handle of handles) {
 			this.workers.set(handle.workerId, {
 				handle,
@@ -73,7 +67,7 @@ export class SupervisorLoop {
 		}
 	}
 
-	addWorker(handle: WorkerHandle): void {
+	addWorker(handle: SupervisedWorkerHandle): void {
 		this.workers.set(handle.workerId, {
 			handle,
 			lastActivityAt: Date.now(),
