@@ -37,6 +37,8 @@ All notable changes to pi-coordination.
 - **Agent config visibility** - Log agent configuration when spawning (model, tools, prompt mode)
 - **Override + no tools warning** - Warn at agent discovery if `system-prompt-mode: override` with no tools specified
 - **Skill doc rewrite** - Updated to current API, emphasizes passing specs directly (don't rewrite user's files)
+- **Scout/planner progress streaming** - Tool calls now stream in real-time during scout and planner phases (was waiting for phase completion)
+- **Better event source labels** - Progress shows `[scout]`, `[plan]`, `[sys]` instead of `[??]` for phase events
 
 ---
 
