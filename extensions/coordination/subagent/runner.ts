@@ -46,7 +46,7 @@ export async function runSingleAgent(
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
-	options?: { outputLimits?: OutputLimits; artifactsDir?: string; artifactLabel?: string; extensions?: string[] },
+	options?: { outputLimits?: OutputLimits; artifactsDir?: string; artifactLabel?: string; extensions?: string[]; attachments?: string[] },
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -149,7 +149,16 @@ export async function runSingleAgent(
 			const tmp = writePromptToTempFile(agent.name, systemPrompt);
 			tmpPromptDir = tmp.dir;
 			tmpPromptPath = tmp.filePath;
-			args.push("--append-system-prompt", tmpPromptPath);
+			// Use --system-prompt for complete override, --append-system-prompt to add to default
+			const promptFlag = agent.systemPromptMode === "override" ? "--system-prompt" : "--append-system-prompt";
+			args.push(promptFlag, tmpPromptPath);
+		}
+
+		// Add file attachments (included in initial message via @file syntax)
+		if (options?.attachments && options.attachments.length > 0) {
+			for (const attachment of options.attachments) {
+				args.push(`@${attachment}`);
+			}
 		}
 
 		args.push(`Task: ${task}`);

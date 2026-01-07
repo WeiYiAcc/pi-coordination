@@ -9,7 +9,7 @@ import type { Task } from "../types.js";
 import type { OutputLimits } from "../../subagent/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PLANNER_EXTENSION_PATH = path.resolve(__dirname, "../../../extensions/coordination/planner.ts");
+const PLANNER_EXTENSION_PATH = path.resolve(__dirname, "../../planner.ts");
 
 export interface PlannerPhaseConfig {
 	humanCheckpoint?: boolean;
@@ -42,26 +42,35 @@ export async function runPlannerPhase(
 	const scoutContextPath = config.scoutContextPath || path.join(coordDir, "scout", "main.md");
 	const scoutFileExists = await fileExists(scoutContextPath);
 
+	// Build attachments list for @file syntax (content included directly in message)
+	const attachments: string[] = [];
+	
 	let scoutSection: string;
 	if (scoutFileExists) {
+		// Include scout context via @file attachment (full content in initial message)
+		attachments.push(scoutContextPath);
 		scoutSection = `## Scout Context
 
-The scout has analyzed the codebase. Use the \`read_context\` tool to read the full context:
+The scout context file is attached above. It contains:
+- **<meta>** — Architecture, patterns, dependencies, gotchas, task recommendations
+- **<file_map>** — Directory structure with modification markers  
+- **<file_contents>** — Relevant code snippets with line numbers
 
-\`\`\`
-read_context({ path: "${scoutContextPath}" })
-\`\`\`
-
-You can also read specific sections:
-- \`read_context({ path: "${scoutContextPath}", section: "file_map" })\` - Get the file tree
-- \`read_context({ path: "${scoutContextPath}", section: "file_contents" })\` - Get file contents
-
-Read the context FIRST before creating the task graph.`;
+**Read the <meta> section carefully** — it contains the scout's task breakdown recommendations.`;
 	} else if (scoutContext.trim()) {
 		scoutSection = `## Scout Context (Codebase Analysis)\n${scoutContext}`;
 	} else {
 		scoutSection = "## Scout Context\n(No scout context provided - analyze the codebase as needed)";
 	}
+
+	const instructions = scoutFileExists
+		? `1. Read the <meta> section from the attached scout context for task recommendations
+2. Review <file_map> to understand project structure  
+3. Check <file_contents> for existing code patterns
+4. Create a task graph based on the plan and scout analysis`
+		: `1. Analyze the scout context (if provided) for codebase patterns
+2. Create a task graph based on the plan requirements
+3. Keep tasks atomic and parallelizable where possible`;
 
 	const task = `Create a task graph for the following implementation plan.
 
@@ -72,10 +81,7 @@ ${planContent}
 
 ## Instructions
 
-1. FIRST: Use \`read_context\` to read the scout context file
-2. Analyze the file_map to understand project structure  
-3. Review file_contents to understand existing code patterns
-4. Create a task graph based on the plan and codebase analysis
+${instructions}
 
 ## Output Requirements
 
@@ -139,6 +145,7 @@ Output ONLY the final JSON object after self-review, no other text.`;
 			artifactsDir: path.join(coordDir, "artifacts"),
 			artifactLabel: "planner",
 			extensions: [PLANNER_EXTENSION_PATH],
+			attachments,
 		},
 	);
 

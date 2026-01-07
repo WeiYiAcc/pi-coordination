@@ -242,9 +242,43 @@ The coordinate tool will:
 
 ## Scout Context Format
 
-The scout outputs a structured context file for the planner with two sections:
+The scout outputs a structured context file for the planner with three sections:
 
 ````markdown
+<meta>
+<architecture>
+How the codebase is organized, package structure, entry points
+</architecture>
+
+<patterns>
+Code patterns to follow, naming conventions, error handling
+</patterns>
+
+<key_files>
+Central files many things depend on, integration points
+</key_files>
+
+<dependencies>
+What depends on what, suggested modification order
+</dependencies>
+
+<gotchas>
+Things that might trip someone up, deprecated code, tight coupling
+</gotchas>
+
+<task_recommendations>
+Suggested task breakdown, what to parallelize vs sequence
+</task_recommendations>
+
+<scope_constraints>
+Implement EXACTLY what plan specifies, no extras
+</scope_constraints>
+
+<omitted>
+Files not included due to budget (list them so planner knows they exist)
+</omitted>
+</meta>
+
 <file_map>
 /path/to/project
 ├── src
@@ -256,25 +290,29 @@ The scout outputs a structured context file for the planner with two sections:
 ├── package.json
 └── README.md
 
-(* denotes files to be modified)
-(+ denotes file contents included below)
+(* = needs modification, + = contents included below)
 </file_map>
 
 <file_contents>
-File: /path/to/project/src/components/Input.tsx
+File: src/components/Input.tsx:1-45 (component)
 ```tsx
 export function Input() { ... }
 ```
 
-File: /path/to/project/src/index.ts
+File: src/index.ts (full file - 12 lines)
 ```ts
 export * from './components';
 ```
 </file_contents>
 ````
 
-The planner reads this context using the `read_context` tool:
+**Token budget**: Scout targets ~30k tokens. If output exceeds budget, it's automatically split:
+- `main.md` — Meta + file_map + highest priority file_contents
+- `overflow.md` — Remaining file_contents (planner can read if needed)
+
+The planner receives scout context as a direct attachment (no tool call needed). For on-demand access:
 - `read_context({ path: "scout/main.md" })` - Full context
+- `read_context({ path: "scout/main.md", section: "meta" })` - Scout's analysis and recommendations
 - `read_context({ path: "scout/main.md", section: "file_map" })` - Just the file tree
 - `read_context({ path: "scout/main.md", section: "file_contents" })` - Just file contents
 
@@ -588,6 +626,44 @@ Async runs start a detached runner and return immediately. Completion is deliver
 - Logs: `coordination-log-*.md` saved to `coordDir` by default in async runs
 
 **Note:** If using the [rewind extension](https://github.com/nicobailon/pi-rewind-hook), avoid restoring files via `/branch` while async coordination is running. Workers write files concurrently; restoring mid-flight can cause inconsistent state or worker failures.
+
+## Agent Customization
+
+Agent prompts are defined in markdown files with YAML frontmatter:
+
+```yaml
+---
+name: my-agent
+description: What this agent does
+model: claude-sonnet-4-20250514
+tools: read, bash
+system-prompt-mode: override
+---
+
+Your custom system prompt here...
+```
+
+**Frontmatter options:**
+| Option | Description |
+|--------|-------------|
+| `name` | Agent identifier (required) |
+| `description` | Human-readable description (required) |
+| `model` | Model override for this agent |
+| `tools` | Comma-separated tool list |
+| `system-prompt-mode` | `append` (default) or `override` |
+
+**System prompt modes:**
+- `append` — Agent prompt is **added** to pi's default coding assistant prompt
+- `override` — Agent prompt **replaces** pi's default prompt entirely
+
+The coordination agents use these modes:
+| Agent | Mode | Reason |
+|-------|------|--------|
+| coordinator | override | Manages workflow, doesn't write code |
+| planner | override | Creates task graphs, no coding tools needed |
+| reviewer | override | Reviews changes, only needs read/bash |
+| scout | override | Analyzes codebase, specific output format |
+| worker | append | Writes code, needs full coding assistant context |
 
 ## Coordination Data Layout
 

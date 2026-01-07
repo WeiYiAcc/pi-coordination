@@ -2,6 +2,7 @@
 name: coordinator
 description: Coordinates parallel workers to execute plans with dependency management
 model: claude-sonnet-4-20250514
+system-prompt-mode: override
 ---
 
 # Coordinator Agent

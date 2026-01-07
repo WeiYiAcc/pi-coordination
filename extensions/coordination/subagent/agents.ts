@@ -14,6 +14,7 @@ export interface AgentConfig {
 	tools?: string[];
 	model?: string;
 	systemPrompt: string;
+	systemPromptMode?: "append" | "override"; // "append" (default) adds to pi's prompt, "override" replaces it
 	source: "user" | "project";
 	filePath: string;
 }
@@ -100,12 +101,15 @@ function loadAgentsFromDir(dir: string, source: "user" | "project", prefix = "")
 		const baseName = entry.name.replace(/\.md$/, "");
 		const agentName = prefix ? `${prefix}/${baseName}` : frontmatter.name;
 
+		const systemPromptMode = frontmatter["system-prompt-mode"] as "append" | "override" | undefined;
+
 		agents.push({
 			name: agentName,
 			description: frontmatter.description,
 			tools: tools && tools.length > 0 ? tools : undefined,
 			model: frontmatter.model,
 			systemPrompt: body,
+			systemPromptMode: systemPromptMode === "override" ? "override" : undefined, // default is append
 			source,
 			filePath: fullPath,
 		});

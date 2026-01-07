@@ -4,6 +4,37 @@ All notable changes to pi-coordination.
 
 ---
 
+## 2026-01-07
+
+### Added
+- **Scout meta section** - Scout outputs `<meta>` block with architecture, patterns, key_files, dependencies, gotchas, task_recommendations, scope_constraints, and omitted files
+- **Token budget enforcement** - Scout has configurable `tokenBudget` (default: 30k) with automatic overflow splitting
+  - When output exceeds budget, splits into `main.md` (meta + file_map + priority files) and `overflow.md` (remaining files)
+  - Appends note to main.md pointing to overflow.md
+- **Scout context attachment** - Planner receives scout context via `@file` attachment for full 100K+ token support (no tool call needed)
+- **PRD vs Spec detection** - Planner auto-detects input type:
+  - PRD/prose → creates task graph from scratch
+  - Spec (already has tasks) → validates and refines without re-decomposing
+- **System prompt override** - Agents can use `system-prompt-mode: override` in frontmatter for complete custom prompts (replaces pi's default coding assistant prompt)
+- **customMetaPrompt** - Scout config option for custom meta guidance appended to scout task
+- **read_context meta section** - `read_context({ section: "meta" })` extracts just the scout's analysis
+
+### Changed
+- **Atomic backlog model** - Planner prompt emphasizes tasks as "backlog items" not "waterfall phases"
+- **Coordination agents use override mode** - coordinator, planner, reviewer, scout now use `system-prompt-mode: override` (worker keeps default append for coding context)
+- Scout prompt updated with `<omitted>` block for files not included due to budget
+- Planner prompt updated with GPT-5.2 patterns: `<scope_constraints>`, `<task_model>`, `<breakdown_rules>` XML blocks
+- `tokenMetrics.estimated` now returns final token count after split (was returning original before split)
+
+### Fixed
+- **planner.ts extension path** - Fixed wrong relative path `../../../extensions/coordination/planner.ts` → `../../planner.ts`
+- Planner instructions now conditional based on whether scout context is attached vs embedded inline
+- Scout overflow token logging now shows actual main/overflow sizes (was showing budget and overage)
+- read_context tool description now lists all sections including "meta"
+- read_context error handler type cast now includes "meta" section
+
+---
+
 ## 2026-01-06
 
 ### Added
