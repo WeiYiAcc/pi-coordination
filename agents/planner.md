@@ -2,6 +2,7 @@
 name: planner
 description: Creates task graphs from plans with Ralph self-review
 model: claude-sonnet-4-20250514
+tools: read, bash
 system-prompt-mode: override
 ---
 

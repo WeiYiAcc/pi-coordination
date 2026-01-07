@@ -534,9 +534,35 @@ export class CoordinationDashboard implements Component {
 				case "cost_limit_reached":
 					message = th.fg("error", `cost limit reached: ${formatCost(event.total)} / ${formatCost(event.limit)}`);
 					break;
+				case "session_started":
+					message = th.fg("muted", "session started");
+					break;
+				case "session_completed":
+					message = th.fg("success", "session completed");
+					break;
+				case "phase_started":
+					message = th.fg("muted", `phase ${(event as { phase?: string }).phase || "?"} started`);
+					break;
+				case "phase_completed":
+					message = th.fg("success", `phase ${(event as { phase?: string }).phase || "?"} done`);
+					break;
+				case "cost_updated": {
+					const costEvent = event as { total?: number };
+					message = th.fg("muted", `cost: ${formatCost(costEvent.total || 0)}`);
+					break;
+				}
+				case "checkpoint_saved":
+					message = th.fg("muted", "checkpoint saved");
+					break;
+				case "planner_review_started":
+					message = th.fg("muted", "planner reviewing task");
+					break;
+				case "planner_review_complete":
+					message = th.fg("success", "planner review done");
+					break;
 				default: {
 					const unknownEvent = event as { type: string };
-					message = unknownEvent.type;
+					message = th.fg("warning", unknownEvent.type || "??");
 				}
 			}
 

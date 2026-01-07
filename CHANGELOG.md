@@ -32,6 +32,10 @@ All notable changes to pi-coordination.
 - Scout overflow token logging now shows actual main/overflow sizes (was showing budget and overage)
 - read_context tool description now lists all sections including "meta"
 - read_context error handler type cast now includes "meta" section
+- **Override mode agents missing tools** - Scout, planner, coordinator now have explicit `tools:` in frontmatter (override mode removes default tools)
+- **Dashboard `[??]` events** - Added handlers for `session_started`, `session_completed`, `phase_started`, `phase_completed`, `cost_updated`, `checkpoint_saved`, `planner_review_started`, `planner_review_complete`
+- **Agent config visibility** - Log agent configuration when spawning (model, tools, prompt mode)
+- **Override + no tools warning** - Warn at agent discovery if `system-prompt-mode: override` with no tools specified
 
 ---
 

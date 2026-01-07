@@ -63,6 +63,14 @@ export async function runSingleAgent(
 		};
 	}
 
+	// Log agent configuration for observability
+	const hasTools = agent.tools && agent.tools.length > 0;
+	const toolsList = hasTools 
+		? agent.tools!.join(", ") 
+		: (agent.systemPromptMode === "override" ? "NONE" : "default");
+	const modeLabel = agent.systemPromptMode === "override" ? "override" : "append";
+	console.log(`[subagent] ${agentName}: model=${agent.model || "default"}, tools=[${toolsList}], prompt=${modeLabel}`);
+
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 	if (agent.model) args.push("--model", agent.model);
 	

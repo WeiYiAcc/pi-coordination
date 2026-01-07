@@ -103,6 +103,11 @@ function loadAgentsFromDir(dir: string, source: "user" | "project", prefix = "")
 
 		const systemPromptMode = frontmatter["system-prompt-mode"] as "append" | "override" | undefined;
 
+		// Warn if override mode with no tools - likely a configuration error
+		if (systemPromptMode === "override" && (!tools || tools.length === 0)) {
+			console.warn(`⚠️  Agent "${agentName}" uses system-prompt-mode: override but has no tools specified. It will have NO tools available.`);
+		}
+
 		agents.push({
 			name: agentName,
 			description: frontmatter.description,
