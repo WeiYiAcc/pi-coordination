@@ -12,6 +12,27 @@ import { Container, Text } from "@mariozechner/pi-tui";
 import { Type, type Static } from "@sinclair/typebox";
 import { discoverAgents, type AgentConfig } from "../subagent/agents.js";
 import { getResultOutput } from "../subagent/render.js";
+import {
+	ICONS,
+	getSpinnerFrame,
+	getStatusIcon,
+	getStatusColor,
+	formatDuration,
+	formatCost,
+	formatContextUsage,
+	renderPipelineRow,
+	renderCostBreakdown,
+	renderWorkersCompact,
+	renderTasksCompact,
+	renderEventLine,
+	drawBoxTop,
+	drawBoxBottom,
+	drawBoxLine,
+	workerStateToDisplay,
+	type PipelineDisplayState,
+	type WorkerDisplayState,
+	type TaskDisplayState,
+} from "./render-utils.js";
 
 interface CoordinationSettings {
 	agents?: string[] | number;
@@ -168,7 +189,7 @@ interface CoordinationRuntime extends AgentRuntime {
 }
 
 const CoordinateParams = Type.Object({
-	plan: Type.String({ description: "Path to markdown plan file" }),
+	plan: Type.String({ description: "Path to markdown file (spec, PRD, or plan) - planner decomposes any format" }),
 	agents: Type.Optional(Type.Union([
 		Type.Array(Type.String()),
 		Type.Number(),
@@ -480,7 +501,7 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 	process.env.PI_COORDINATION_DIR = coordDir;
 	process.env.PI_AGENT_IDENTITY = "coordinator";
 
-	const coordinatorExtensionPath = path.join(__dirname, "..", "..", "extensions", "coordination", "coordinator.ts");
+	const coordinatorExtensionPath = path.join(__dirname, "..", "coordinator.ts");
 
 	const discovery = discoverAgents(runtime.cwd, "user");
 	const agents = discovery.agents;
@@ -738,10 +759,29 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 	let lastCoordResult: SingleResult = { agent: "coordinator", agentSource: "user", task: "", exitCode: -1, messages: [], stderr: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 } };
 	let lastMilestoneThreshold = 0;
 
+	let lastCoordToolEndMs = 0; // Dedup coordinator tool events
 	const coordOnUpdate: typeof onUpdate = onUpdate ? (partial) => {
 		const result = partial.details?.results[0];
 		if (result) {
 			lastCoordResult = result;
+			
+			// Emit coordinator tool calls to event stream (deduped)
+			const recentTools = result.recentTools;
+			if (recentTools && recentTools.length > 0) {
+				const latest = recentTools[0];
+				if (latest.endMs && latest.endMs !== lastCoordToolEndMs) {
+					lastCoordToolEndMs = latest.endMs;
+					storage.appendEvent({
+						type: "tool_call",
+						tool: latest.tool,
+						file: latest.args,
+						workerId: "coordinator",
+						contextTokens: result.usage?.contextTokens,
+						timestamp: Date.now(),
+					}).catch(() => {});
+				}
+			}
+			
 			storage.getState().then(async state => {
 				const workerStates = await storage.listWorkerStates();
 				const events = await storage.getEvents();
@@ -858,7 +898,7 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 			const task = buildCoordinatorTask(
 				planContent,
 				scoutContext,
-				params.agents,
+				pipelineConfig.agents,
 				coordDir,
 				sharedContextReady ? sharedContextPath : undefined,
 			);
@@ -1100,7 +1140,7 @@ export function createCoordinateTool(events: EventBus): ToolDefinition<typeof Co
 		name: "coordinate",
 		label: "Coordinate",
 		description:
-			"Start multi-agent coordination session. Splits a plan across parallel workers, manages dependencies, and returns unified results. Saves a markdown log to the project directory (configurable via logPath parameter or PI_COORDINATION_LOG_DIR env var).",
+			"Start multi-agent coordination session. Pass any markdown file (spec, PRD, plan) directly - the planner decomposes it into parallel tasks. Don't rewrite or convert the file first. Saves a markdown log to the project directory (configurable via logPath parameter or PI_COORDINATION_LOG_DIR env var).",
 		parameters: CoordinateParams,
 
 		async execute(_toolCallId, params, onUpdate, ctx, signal) {
@@ -1210,10 +1250,12 @@ export function createCoordinateTool(events: EventBus): ToolDefinition<typeof Co
 			const planPath = args.plan || "...";
 			const agentCount = args.agents?.length || 0;
 			const asyncLabel = args.async ? theme.fg("warning", " [async]") : "";
+			const expandHint = theme.fg("dim", " [Opt+C: expand]");
 			let text = theme.fg("toolTitle", theme.bold("coordinate ")) +
 				theme.fg("accent", planPath) +
 				theme.fg("muted", ` (${agentCount} agents)`) +
-				asyncLabel;
+				asyncLabel +
+				expandHint;
 			return new Text(text, 0, 0);
 		},
 
@@ -1230,108 +1272,73 @@ export function createCoordinateTool(events: EventBus): ToolDefinition<typeof Co
 			}
 
 			const container = new Container();
-			const isError = result.isError;
-			const icon = isError ? theme.fg("error", "x") : theme.fg("success", "ok");
 			const workers = details.workers || [];
 			const events = details.events || [];
 			const allDone = workers.length > 0 &&
 				workers.every(w => w.status === "complete" || w.status === "failed");
+			const width = Math.min(process.stdout.columns || 120, 120); // Dynamic width, max 120
 
-			if (details.pipeline) {
-				const phases: PipelinePhase[] = ["scout", "planner", "coordinator", "workers", "review", "fixes", "complete"];
-				const current = details.pipeline.currentPhase;
+			// Convert to display state for shared renderers
+			const workerDisplays: WorkerDisplayState[] = workers.map(w => workerStateToDisplay(w));
+			
+			// Build pipeline state
+			const pipelineState: PipelineDisplayState | null = details.pipeline ? {
+				currentPhase: details.pipeline.currentPhase,
+				phases: details.pipeline.phases,
+				cost: details.cost?.total || 0,
+				costByPhase: details.cost?.byPhase,
+				elapsed: Date.now() - (details.startedAt || Date.now()),
+			} : null;
 
-				let timeline = "";
-				for (const phase of phases) {
-					const status = details.pipeline.phases[phase]?.status;
-
-					if (status === "complete") {
-						timeline += theme.fg("success", `[${phase}]`) + " -> ";
-					} else if (status === "running") {
-						timeline += theme.fg("warning", `[${phase}]`) + " -> ";
-					} else if (status === "failed") {
-						timeline += theme.fg("error", `[${phase}]`) + " -> ";
-					} else {
-						timeline += theme.fg("muted", `[${phase}]`) + " -> ";
-					}
-				}
-
-				container.addChild(new Text(`Pipeline: ${timeline.slice(0, -4)}`, 0, 0));
-				container.addChild(new Text(`Current: ${current}`, 0, 0));
-				if (details.cost) {
-					container.addChild(new Text(
-						`Cost: $${details.cost.total.toFixed(2)} / $${details.cost.limit.toFixed(2)} limit`,
-						0, 0
-					));
-				}
-				container.addChild(new Text("", 0, 0));
-			}
-
-			const formatElapsed = (ms: number): string => {
-				const secs = Math.floor(ms / 1000);
-				if (secs < 60) return `${secs}s`;
-				const mins = Math.floor(secs / 60);
-				const remainingSecs = secs % 60;
-				return `${mins}m${remainingSecs}s`;
-			};
-
-			const statusColor = (status: string): string => {
-				switch (status) {
-					case "complete": return "success";
-					case "failed": case "blocked": return "error";
-					case "working": return "warning";
-					case "waiting": return "muted";
-					default: return "dim";
-				}
-			};
-
+			// ─────────────────────────────────────────────────────────────────
+			// Completed state - show summary table
+			// ─────────────────────────────────────────────────────────────────
 			if (allDone) {
 				const totalTime = Date.now() - (details.startedAt || Date.now());
-				const totalCost = workers.reduce((sum, w) => sum + w.usage.cost, 0);
+				// Use full cost from costState (includes scout, planner, coordinator, review)
+				const totalCost = details.cost?.total || workers.reduce((sum, w) => sum + w.usage.cost, 0);
 				const failed = workers.filter(w => w.status === "failed").length;
 
+				const headerIcon = failed > 0 ? ICONS.failed : ICONS.complete;
 				const headerText = failed > 0
-					? `Coordination Failed (${formatElapsed(totalTime)} elapsed, $${totalCost.toFixed(2)} spent)`
-					: `Coordination Complete (${formatElapsed(totalTime)} total, $${totalCost.toFixed(2)})`;
+					? `${headerIcon} Coordination Failed`
+					: `${headerIcon} Coordination Complete`;
 
-				container.addChild(new Text(
-					failed > 0 ? theme.fg("error", headerText) : theme.fg("success", headerText),
-					0, 0
-				));
-				container.addChild(new Text("", 0, 0));
+				container.addChild(new Text(drawBoxTop(width, headerText, theme), 0, 0));
+				
+				// Summary line
+				const summaryLine = `${theme.fg("muted", "Duration:")} ${formatDuration(totalTime)}  ${theme.fg("muted", "Cost:")} ${formatCost(totalCost)}  ${theme.fg("muted", "Workers:")} ${workers.length}`;
+				container.addChild(new Text(drawBoxLine(summaryLine, width, theme), 0, 0));
+				container.addChild(new Text(drawBoxLine("", width, theme), 0, 0));
 
-				container.addChild(new Text(
-					theme.fg("muted", "| Worker      | Time   | Cost  | Turns | Files Modified"),
-					0, 0
-				));
-				container.addChild(new Text(
-					theme.fg("muted", "|-------------|--------|-------|-------|---------------"),
-					0, 0
-				));
+				// Worker table header
+				const tableHeader = `${theme.fg("dim", "Worker")}      ${theme.fg("dim", "Time")}    ${theme.fg("dim", "Cost")}    ${theme.fg("dim", "Turns")}  ${theme.fg("dim", "Files")}`;
+				container.addChild(new Text(drawBoxLine(tableHeader, width, theme), 0, 0));
 
 				for (const w of workers) {
-					const time = w.completedAt && w.startedAt
-						? formatElapsed(w.completedAt - w.startedAt)
-						: "--";
-					const cost = `$${w.usage.cost.toFixed(2)}`;
-					const turns = w.usage.turns.toString();
-					const files = w.filesModified.slice(0, 2).join(", ") +
-						(w.filesModified.length > 2 ? "..." : "");
 					const statusIcon = w.status === "complete"
-						? theme.fg("success", "ok")
-						: theme.fg("error", "FAILED");
+						? theme.fg("success", ICONS.complete)
+						: theme.fg("error", ICONS.failed);
+					const time = w.completedAt && w.startedAt
+						? formatDuration(w.completedAt - w.startedAt)
+						: "--";
+					const cost = formatCost(w.usage.cost);
+					const turns = w.usage.turns.toString();
+					const files = w.filesModified.slice(0, 2).map(f => path.basename(f)).join(", ") +
+						(w.filesModified.length > 2 ? "..." : "");
 
-					container.addChild(new Text(
-						`| ${statusIcon} ${theme.fg("accent", `worker:${w.shortId}`)} | ${time.padEnd(6)} | ${cost.padEnd(5)} | ${turns.padEnd(5)} | ${files}`,
-						0, 0
-					));
+					const row = `${statusIcon} ${theme.fg("accent", w.shortId.padEnd(8))} ${time.padEnd(8)} ${cost.padEnd(8)} ${turns.padEnd(6)} ${theme.fg("dim", files)}`;
+					container.addChild(new Text(drawBoxLine(row, width, theme), 0, 0));
 				}
 
+				container.addChild(new Text(drawBoxBottom(width, theme), 0, 0));
+
+				// Coordinator summary if available
 				const output = details.coordinatorResult ? getResultOutput(details.coordinatorResult) : "";
 				if (output) {
 					container.addChild(new Text("", 0, 0));
-					container.addChild(new Text(theme.fg("muted", "--- Coordinator Summary ---"), 0, 0));
-					const lines = output.split("\n").slice(0, 15);
+					container.addChild(new Text(theme.fg("muted", "─── Summary ───"), 0, 0));
+					const lines = output.split("\n").slice(0, 10);
 					for (const line of lines) {
 						container.addChild(new Text(theme.fg("dim", line.slice(0, 100)), 0, 0));
 					}
@@ -1340,139 +1347,61 @@ export function createCoordinateTool(events: EventBus): ToolDefinition<typeof Co
 				return container;
 			}
 
-			const complete = workers.filter(w => w.status === "complete").length;
-			container.addChild(new Text(
-				`${icon} ${complete}/${workers.length || details.pendingAgents?.length || 0} workers`,
-				0, 0
-			));
+			// ─────────────────────────────────────────────────────────────────
+			// In-progress state - show live dashboard
+			// ─────────────────────────────────────────────────────────────────
+			container.addChild(new Text(drawBoxTop(width, "Coordination", theme), 0, 0));
 
-			if (workers.length > 0) {
-				for (let i = 0; i < workers.length; i += 2) {
-					let line = "";
-					for (let j = i; j < Math.min(i + 2, workers.length); j++) {
-						const w = workers[j];
-						const elapsed = formatElapsed(Date.now() - w.startedAt);
-						const displayFile = w.currentFile 
-							|| (w.filesModified.length > 0 ? w.filesModified[w.filesModified.length - 1] : null);
-						const file = displayFile
-							? path.basename(displayFile).slice(0, 12).padEnd(12)
-							: "----".padEnd(12);
-						const statusText = w.status === "waiting" && w.waitingFor
-							? `wait:${w.waitingFor.identity.split("-").pop()}`
-							: w.status;
-
-						line += `${theme.fg("accent", `worker:${w.shortId}`)} `;
-						line += `${theme.fg("dim", file)} `;
-						line += `${theme.fg(statusColor(w.status), statusText.padEnd(8))} `;
-						line += `${theme.fg("muted", elapsed.padEnd(6))}  `;
-					}
-					container.addChild(new Text(line, 0, 0));
-				}
-			} else if (details.pendingAgents && details.pendingAgents.length > 0) {
-				const spinnerFrames = ["|", "/", "-", "\\"];
-				const frameIndex = Math.floor(Date.now() / 80) % spinnerFrames.length;
-				const spinner = spinnerFrames[frameIndex];
-				let line = "";
-				for (const agent of details.pendingAgents) {
-					line += `${theme.fg("warning", spinner)} ${theme.fg("accent", agent)}  `;
-				}
-				container.addChild(new Text(line, 0, 0));
+			// Pipeline row
+			if (pipelineState) {
+				const pipelineRow = renderPipelineRow(pipelineState, theme, width - 4);
+				container.addChild(new Text(drawBoxLine(pipelineRow, width, theme), 0, 0));
 			}
 
+			// Workers section
+			if (workers.length > 0) {
+				const workerLines = renderWorkersCompact(workerDisplays, theme, width - 4);
+				for (const line of workerLines) {
+					container.addChild(new Text(drawBoxLine(line, width, theme), 0, 0));
+				}
+			} else if (details.pendingAgents && details.pendingAgents.length > 0) {
+				// Show pending agents with spinner
+				const spinner = getSpinnerFrame();
+				let line = "";
+				for (const agent of details.pendingAgents.slice(0, 4)) {
+					line += `${theme.fg("warning", spinner)} ${theme.fg("accent", agent)}  `;
+				}
+				if (details.pendingAgents.length > 4) {
+					line += theme.fg("dim", `+${details.pendingAgents.length - 4} more`);
+				}
+				container.addChild(new Text(drawBoxLine(line, width, theme), 0, 0));
+			}
+
+			container.addChild(new Text(drawBoxBottom(width, theme), 0, 0));
+
+			// Cost breakdown (outside box)
+			if (pipelineState?.costByPhase) {
+				const costLine = renderCostBreakdown(pipelineState.costByPhase, theme);
+				if (costLine) {
+					container.addChild(new Text(costLine, 0, 0));
+				}
+			}
+
+			// Events section (outside box for live streaming feel)
 			if (events.length > 0) {
-				container.addChild(new Text(theme.fg("muted", "---"), 0, 0));
-				const recentEvents = events.slice(-10);
+				container.addChild(new Text("", 0, 0));
+				// Expanded: show 25 events with full paths; Normal: 8 events truncated
+				const eventCount = expanded ? 25 : 8;
+				const recentEvents = events.slice(-eventCount);
 				const firstTs = events[0]?.timestamp || Date.now();
 
 				for (const ev of recentEvents) {
-					const elapsed = `+${((ev.timestamp - firstTs) / 1000).toFixed(1)}s`;
-					let shortId: string;
-					const workerId = (ev as { workerId?: string }).workerId;
-					if (ev.type === "cost_milestone" || ev.type === "cost_limit_reached") {
-						shortId = "$";
-					} else if (ev.type === "phase_complete" || ev.type === "phase_completed" || ev.type === "phase_started" || ev.type === "session_started" || ev.type === "session_completed" || ev.type === "checkpoint_saved" || ev.type === "cost_updated") {
-						shortId = "sys";
-					} else if (ev.type === "coordinator" || ev.type === "planner_review_started" || ev.type === "planner_review_complete") {
-						shortId = "co";
-					} else if (workerId === "scout") {
-						shortId = "scout";
-					} else if (workerId === "planner") {
-						shortId = "plan";
-					} else {
-						shortId = workerId?.slice(0, 4) || "??";
-					}
-
-					let line = `${theme.fg("muted", elapsed.padEnd(8))}`;
-					line += `${theme.fg("accent", `[${shortId}]`)} `;
-
-					switch (ev.type) {
-						case "tool_call":
-							line += theme.fg("dim", `${ev.tool}${ev.file ? ` ${path.basename(ev.file)}` : ""}`);
-							break;
-						case "tool_result":
-							line += theme.fg("dim", `${ev.tool} ${ev.success ? "ok" : "error"}`);
-							break;
-						case "waiting":
-							const waiterId = ev.waitingFor.split("-").pop() || "??";
-							line += theme.fg("warning", `waiting for ${ev.item} from ${waiterId}`);
-							break;
-						case "contract_received":
-							const fromId = ev.from.split("-").pop() || "??";
-							line += theme.fg("success", `received contract from ${fromId}`);
-							break;
-						case "worker_started":
-							line += theme.fg("success", "started");
-							break;
-						case "worker_completed":
-							line += theme.fg("success", "complete_task (done)");
-							break;
-						case "worker_failed":
-							line += theme.fg("error", `FAILED: ${ev.error}`);
-							break;
-						case "cost_milestone":
-							const totals = Object.entries(ev.totals)
-								.map(([id, cost]) => `${id.slice(0, 4)}: $${cost.toFixed(2)}`)
-								.join(" | ");
-							line += theme.fg("muted", `${totals} | total: $${ev.aggregate.toFixed(2)}`);
-							break;
-						case "coordinator":
-							line += theme.fg("dim", ev.message.slice(0, 50));
-							break;
-						case "phase_complete":
-							line += theme.fg("success", `phase ${ev.phase} done ($${ev.cost.toFixed(2)})`);
-							break;
-						case "cost_limit_reached":
-							line += theme.fg("warning", `cost limit reached: $${(ev as { total: number }).total.toFixed(2)}`);
-							break;
-						case "session_started":
-							line += theme.fg("muted", "session started");
-							break;
-						case "session_completed":
-							line += theme.fg("success", "session completed");
-							break;
-						case "phase_started":
-							line += theme.fg("muted", `phase ${(ev as { phase?: string }).phase || "?"} started`);
-							break;
-						case "phase_completed":
-							line += theme.fg("success", `phase ${(ev as { phase?: string }).phase || "?"} done`);
-							break;
-						case "cost_updated":
-							line += theme.fg("dim", `cost: $${((ev as { total?: number }).total || 0).toFixed(2)}`);
-							break;
-						case "checkpoint_saved":
-							line += theme.fg("dim", "checkpoint");
-							break;
-						case "planner_review_started":
-							line += theme.fg("muted", "reviewing tasks");
-							break;
-						case "planner_review_complete":
-							line += theme.fg("success", "tasks approved");
-							break;
-						default:
-							line += theme.fg("dim", (ev as { type: string }).type);
-					}
-
+					const line = renderEventLine(ev, firstTs, theme, expanded);
 					container.addChild(new Text(line, 0, 0));
+				}
+				
+				if (expanded && events.length > eventCount) {
+					container.addChild(new Text(theme.fg("dim", `  ... ${events.length - eventCount} earlier events`), 0, 0));
 				}
 			}
 

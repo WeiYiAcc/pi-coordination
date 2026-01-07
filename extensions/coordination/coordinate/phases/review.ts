@@ -17,6 +17,7 @@ export interface ReviewConfig {
 	checkTests: boolean;
 	verifyPlanGoals: boolean;
 	outputLimits?: OutputLimits;
+	onProgress?: (update: { details?: unknown }) => void;
 }
 
 export interface NewTaskRequest {
@@ -128,7 +129,7 @@ Use "newTasks" for larger work that needs a dedicated worker (e.g., new features
 		runtime.cwd,
 		undefined,
 		signal,
-		undefined,
+		config.onProgress,
 		(results) => ({ mode: "single", results, agentScope: "user", projectAgentsDir: null }),
 		{ outputLimits: config.outputLimits, artifactsDir: path.join(coordDir, "artifacts"), artifactLabel: "review" },
 	);

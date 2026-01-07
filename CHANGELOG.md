@@ -39,6 +39,35 @@ All notable changes to pi-coordination.
 - **Skill doc rewrite** - Updated to current API, emphasizes passing specs directly (don't rewrite user's files)
 - **Scout/planner progress streaming** - Tool calls now stream in real-time during scout and planner phases (was waiting for phase completion)
 - **Better event source labels** - Progress shows `[scout]`, `[plan]`, `[sys]` instead of `[??]` for phase events
+- **Tool call details** - Shows command/path args (e.g., `bash find . -name "*.ts"`, `read tui.ts`)
+- **Context window usage** - Shows `[scout 29.4%/59k]` with context window % and token count
+- **Tool description fix** - Now says "Pass any markdown file (spec, PRD, plan) directly" to prevent spec conversion
+- **Fix coordinator crash** - `params.agents` (could be number) was passed to `.join()` instead of normalized array
+- **Fix duplicate tool events** - Track `lastToolEndMs` to deduplicate; still uses `recentTools[0]` for reliability
+- **Telemetry error logging** - Progress callback errors now captured via `ctx.obs.errors` instead of silently swallowed
+- **Unified render utilities** - Shared icons, formatters, and renderers between sync and async dashboards
+- **Improved sync display** - Box-drawn UI with spinner icons (⠋⠙⠹⠸), checkmarks (✓✗), and consistent styling
+- **Coordinator progress streaming** - Coordinator phase now emits tool call events like scout/planner
+- **Planner verification mode** - Planner now verifies detailed specs against scout context, restructures if issues found
+- **Input type detection** - Planner detects: detailed-spec, phased-plan, PRD, existing task-graph
+- **Phase→atomic conversion** - Planner converts waterfall phases to atomic parallel tasks
+- **Fixed coordinator extension path** - Extension path was doubled (`/extensions/extensions/`), now correct
+- **Worker tool call streaming** - Worker tool calls now emit to main event stream for visibility
+- **Worker spawn events** - Added `worker_spawning` event handler with logical name display
+- **Missing event handlers** - Added handlers for `review_started`, `fix_completed`, `fixes_started`, `activity`
+- **Cost breakdown in pipeline** - Shows per-phase costs like `$1.27 (s:$0.64 p:$0.20 w:$0.43)`
+- **Activity events during scout** - Emits activity events when context grows 5k+ tokens (prevents "stuck" appearance)
+- **Reviewer progress streaming** - Review phase now emits tool call events like scout/planner
+- **Expanded view (Opt+C)** - Shows 25 events with full paths instead of 8 truncated; hint shown in tool header
+- **Dynamic box width** - Uses terminal width (max 120) instead of fixed 80
+- **Cleaner pipeline row** - Removed `│` separator between cost and time
+- **Cost breakdown on own row** - Moved outside the box for cleaner display
+- **Worker activity display** - Shows current tool + file for active workers
+- **Worker cost tracking** - Fixed workers showing $0.00; now properly extracts cost from `usage.cost.total` in message_end events
+- **Event type consistency** - Added `review_completed` handler (pipeline emits this, was only handling `review_complete`)
+- **Event shortId for review_completed** - Added to sys events array so it shows `[sys]` not `[??]`
+- **Context % capped at 100%** - `formatContextUsage` and worker display no longer show >100%
+- **Completed state total cost** - Now uses full `costState.total` (includes scout/planner/coordinator/review), not just worker sum
 
 ---
 

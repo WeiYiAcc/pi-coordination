@@ -64,67 +64,27 @@ The scout context file is attached above. It contains:
 		scoutSection = "## Scout Context\n(No scout context provided - analyze the codebase as needed)";
 	}
 
-	const instructions = scoutFileExists
-		? `1. Read the <meta> section from the attached scout context for task recommendations
-2. Review <file_map> to understand project structure  
-3. Check <file_contents> for existing code patterns
-4. Create a task graph based on the plan and scout analysis`
-		: `1. Analyze the scout context (if provided) for codebase patterns
-2. Create a task graph based on the plan requirements
-3. Keep tasks atomic and parallelizable where possible`;
-
-	const task = `Create a task graph for the following implementation plan.
+	const task = `Analyze and create a task graph for the following implementation plan.
 
 ${scoutSection}
 
 ## Implementation Plan
+
 ${planContent}
 
-## Instructions
+## Your Task
 
-${instructions}
+1. **Detect input type**: Is this a detailed spec, phased plan, PRD, or existing task graph?
+2. **If detailed spec**: Verify against scout context (files exist, functions exist, line numbers correct)
+3. **Create/extract task graph**: Atomic tasks with proper dependencies
+4. **Self-review**: Check structure, granularity, completeness
+5. **Output JSON**: Include analysis of what you found/changed
 
-## Output Requirements
+Output a JSON object with:
+- \`analysis\`: { inputType, verificationStatus, issuesFound, changes }
+- \`tasks\`: Array of task objects
 
-Output a valid JSON object with a "tasks" array. Each task should have:
-- id: Unique identifier (e.g., "TASK-01")
-- description: Clear description of what to implement
-- priority: 0=critical, 1=high, 2=medium, 3=low
-- files: Array of files to modify (optional)
-- creates: Array of new files to create (optional)
-- dependsOn: Array of task IDs this depends on
-- acceptanceCriteria: Array of criteria for completion
-
-Rules:
-1. No file overlaps without dependencies
-2. At least one task must have no dependencies
-3. Include a final integration task
-4. Keep tasks atomic (completable in one session)
-
-## Self-Review Required
-
-After generating the task graph, you MUST review it with "fresh eyes" checking for:
-
-1. STRUCTURAL ISSUES:
-   - Dependency cycles (A depends on B depends on A)
-   - File overlaps without dependencies (collision risk)
-   - Missing entry points (no task with dependsOn: [])
-   - Missing integration task
-
-2. GRANULARITY ISSUES:
-   - Tasks too large (should be split)
-   - Tasks too small (should be combined)
-
-3. COMPLETENESS ISSUES:
-   - PRD requirements not covered
-   - Vague acceptance criteria
-
-4. PRIORITY ISSUES:
-   - Critical path not prioritized
-   - Everything marked P:1
-
-If you find issues during self-review, fix them before outputting.
-Output ONLY the final JSON object after self-review, no other text.`;
+Follow your system prompt for the full decision tree and output format.`;
 
 	const agentName = config.agentName || "coordination/planner";
 	const agentsWithOverride = config.model

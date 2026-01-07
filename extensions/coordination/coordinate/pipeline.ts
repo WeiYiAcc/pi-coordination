@@ -242,21 +242,62 @@ export async function runScoutPhaseWrapper(
 			maxFileSize: 50000,
 			outputLimits: config.maxOutput,
 			model: config.models?.scout,
-			onProgress: (update) => {
-				// Stream scout progress to coordination events
-				const details = update.details as { results?: Array<{ recentTools?: Array<{ tool: string; file?: string }> }> };
-				const recentTools = details?.results?.[0]?.recentTools;
-				if (recentTools && recentTools.length > 0) {
-					const latest = recentTools[0];
-					ctx.storage.appendEvent({
-						type: "tool_call",
-						tool: latest.tool,
-						file: latest.file,
-						workerId: "scout",
-						timestamp: Date.now(),
-					}).catch(() => {});
-				}
-			},
+			onProgress: (() => {
+				let lastToolEndMs = 0; // Dedup: track last emitted tool
+				let lastContextTokens = 0; // Track context growth for activity indication
+				let lastActivityEmit = 0; // Rate limit activity events
+				return (update: { details?: unknown }) => {
+					const details = update.details as { results?: Array<{ recentTools?: Array<{ tool: string; args?: string; endMs: number }>; usage?: { contextTokens?: number } }> };
+					const result = details?.results?.[0];
+					const recentTools = result?.recentTools;
+					const contextTokens = result?.usage?.contextTokens || 0;
+					
+					if (recentTools && recentTools.length > 0) {
+						const latest = recentTools[0];
+						// Emit if this is a NEW tool (different endMs)
+						if (latest.endMs && latest.endMs !== lastToolEndMs) {
+							lastToolEndMs = latest.endMs;
+							lastActivityEmit = Date.now();
+							ctx.storage.appendEvent({
+								type: "tool_call",
+								tool: latest.tool,
+								file: latest.args,
+								workerId: "scout",
+								contextTokens,
+								timestamp: Date.now(),
+							}).catch((err) => {
+								ctx.obs?.errors.capture(err, {
+									category: "telemetry_error",
+									severity: "warning",
+									actor: "scout",
+									phase: "scout",
+									recoverable: true,
+								}).catch(() => {});
+							});
+						}
+					}
+					
+					// Emit activity event on token growth OR time-based heartbeat
+					const now = Date.now();
+					const tokenDelta = contextTokens - lastContextTokens;
+					const timeSinceLastEmit = now - lastActivityEmit;
+					
+					// Emit if: tokens grew 2k+ OR 10 seconds passed (heartbeat)
+					const shouldEmit = (tokenDelta >= 2000 && timeSinceLastEmit > 1500) || 
+					                   (timeSinceLastEmit > 10000 && contextTokens > 0);
+					
+					if (shouldEmit) {
+						lastContextTokens = contextTokens;
+						lastActivityEmit = now;
+						ctx.storage.appendEvent({
+							type: "activity",
+							phase: "scout",
+							contextTokens,
+							timestamp: now,
+						}).catch(() => {});
+					}
+				};
+			})(),
 		};
 
 		const result = await runScoutPhase(
@@ -325,21 +366,37 @@ export async function runPlannerPhaseWrapper(
 			maxSelfReviewCycles: config.planner.maxSelfReviewCycles || 5,
 			outputLimits: config.maxOutput,
 			model: config.models?.planner,
-			onProgress: (update) => {
-				// Stream planner progress to coordination events
-				const details = update.details as { results?: Array<{ recentTools?: Array<{ tool: string; file?: string }> }> };
-				const recentTools = details?.results?.[0]?.recentTools;
-				if (recentTools && recentTools.length > 0) {
-					const latest = recentTools[0];
-					ctx.storage.appendEvent({
-						type: "tool_call",
-						tool: latest.tool,
-						file: latest.file,
-						workerId: "planner",
-						timestamp: Date.now(),
-					}).catch(() => {});
-				}
-			},
+			onProgress: (() => {
+				let lastToolEndMs = 0; // Dedup: track last emitted tool
+				return (update: { details?: unknown }) => {
+					const details = update.details as { results?: Array<{ recentTools?: Array<{ tool: string; args?: string; endMs: number }>; usage?: { contextTokens?: number } }> };
+					const result = details?.results?.[0];
+					const recentTools = result?.recentTools;
+					if (recentTools && recentTools.length > 0) {
+						const latest = recentTools[0];
+						// Only emit if this is a NEW tool (different endMs)
+						if (latest.endMs && latest.endMs !== lastToolEndMs) {
+							lastToolEndMs = latest.endMs;
+							ctx.storage.appendEvent({
+								type: "tool_call",
+								tool: latest.tool,
+								file: latest.args,
+								workerId: "planner",
+								contextTokens: result?.usage?.contextTokens,
+								timestamp: Date.now(),
+							}).catch((err) => {
+								ctx.obs?.errors.capture(err, {
+									category: "telemetry_error",
+									severity: "warning",
+									actor: "planner",
+									phase: "planner",
+									recoverable: true,
+								}).catch(() => {});
+							});
+						}
+					}
+				};
+			})(),
 		};
 
 		await ctx.obs?.events.emit({
@@ -427,6 +484,28 @@ export async function runReviewPhaseWrapper(
 			checkTests: config.checkTests,
 			verifyPlanGoals: true,
 			outputLimits: config.maxOutput,
+			onProgress: (() => {
+				let lastToolEndMs = 0;
+				return (update: { details?: unknown }) => {
+					const details = update.details as { results?: Array<{ recentTools?: Array<{ tool: string; args?: string; endMs: number }>; usage?: { contextTokens?: number } }> };
+					const result = details?.results?.[0];
+					const recentTools = result?.recentTools;
+					if (recentTools && recentTools.length > 0) {
+						const latest = recentTools[0];
+						if (latest.endMs && latest.endMs !== lastToolEndMs) {
+							lastToolEndMs = latest.endMs;
+							ctx.storage.appendEvent({
+								type: "tool_call",
+								tool: latest.tool,
+								file: latest.args,
+								workerId: "review",
+								contextTokens: result?.usage?.contextTokens,
+								timestamp: Date.now(),
+							}).catch(() => {});
+						}
+					}
+				};
+			})(),
 		};
 
 		const result = await runReviewPhase(

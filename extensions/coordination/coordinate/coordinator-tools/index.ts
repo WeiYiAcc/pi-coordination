@@ -218,6 +218,8 @@ export function spawnWorkerProcess(
 	let lastUpdateMs = 0;
 	let toolCount = 0;
 	let tokens = 0;
+	let costTotal = 0;
+	let turns = 0;
 	let tokenTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 	let currentTool: string | null = null;
 	let currentToolArgs: string | null = null;
@@ -251,6 +253,12 @@ export function spawnWorkerProcess(
 			durationMs: now - startTime,
 			recentTools,
 			lastOutput,
+			usage: {
+				input: tokenTotals.input,
+				output: tokenTotals.output,
+				cost: costTotal,
+				turns,
+			},
 		})).catch(() => {});
 	};
 
@@ -285,6 +293,14 @@ export function spawnWorkerProcess(
 				if (recentTools.length > WORKER_RECENT_TOOLS_LIMIT) {
 					recentTools = recentTools.slice(0, WORKER_RECENT_TOOLS_LIMIT);
 				}
+				// Emit tool_call event to main event stream for visibility
+				storage.appendEvent({
+					type: "tool_call",
+					tool: currentTool,
+					file: currentToolArgs || currentFile,
+					workerId: config.logicalName || workerId,
+					timestamp: Date.now(),
+				}).catch(() => {});
 			}
 			currentTool = null;
 			currentToolArgs = null;
@@ -311,6 +327,7 @@ export function spawnWorkerProcess(
 		if (event.type === "message_end" && event.message) {
 			const msg = event.message;
 			if (msg.role === "assistant") {
+				turns++;
 				const usage = msg.usage;
 				if (usage) {
 					tokenTotals.input += usage.input || 0;
@@ -318,6 +335,7 @@ export function spawnWorkerProcess(
 					tokenTotals.cacheRead += usage.cacheRead || 0;
 					tokenTotals.cacheWrite += usage.cacheWrite || 0;
 					tokens = tokenTotals.input + tokenTotals.output + tokenTotals.cacheRead + tokenTotals.cacheWrite;
+					costTotal += usage.cost?.total || 0;
 				}
 				for (const block of msg.content || []) {
 					if (block.type === "text" && block.text) rawOutput += block.text;

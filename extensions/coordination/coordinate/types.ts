@@ -110,7 +110,7 @@ export interface WorkerStateFile {
 }
 
 export type CoordinationEvent =
-	| { type: "tool_call"; workerId: string; tool: string; file?: string; timestamp: number }
+	| { type: "tool_call"; workerId: string; tool: string; file?: string; contextTokens?: number; timestamp: number }
 	| { type: "tool_result"; workerId: string; tool: string; file?: string; success: boolean; timestamp: number }
 	| { type: "waiting"; workerId: string; waitingFor: string; item: string; timestamp: number }
 	| { type: "contract_received"; workerId: string; from: string; item: string; timestamp: number }
