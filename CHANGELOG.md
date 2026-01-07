@@ -16,7 +16,7 @@ All notable changes to pi-coordination.
 - **Reviewer newTasks** - Code reviewer can add new tasks via `newTasks` field in JSON output, creates FIX-XX tasks
 - **Atomic Task ID Generation** - DISC-XX and FIX-XX IDs generated inside `addDiscoveredTask()` with file locking
 - **Stale Task Cleanup** - Supervisor cleans up orphaned claimed tasks after configurable timeout
-- **Coordination Dashboard** - Full-screen TUI for monitoring async coordination jobs via `/coord` command
+- **Coordination Dashboard** - Full-screen TUI via `/jobs` command, plus MiniDashboard widget above input
   - Pipeline status with phase indicators (pending/running/complete/failed)
   - Task queue section with status, dependencies, and worker assignments
   - Worker grid with scrolling, selection, and progress bars

@@ -951,7 +951,7 @@ export class MiniFooter implements Component {
 			hint = th.fg("success", "done");
 		} else {
 			statusIcon = th.fg("warning", "\u25cf");
-			hint = th.fg("muted", "/coord to open");
+			hint = th.fg("muted", "/jobs to open");
 		}
 
 		const status = `[coord] ${state.phase} ${statusIcon} ${state.workers}`;
@@ -1008,4 +1008,349 @@ export class MiniFooter implements Component {
 			return null;
 		}
 	}
+}
+
+/**
+ * Compact dashboard widget shown above the input.
+ * Shows phase progress, task status, worker status, cost/time.
+ */
+export class MiniDashboard implements Component {
+	private coordDir: string;
+	private theme: Theme;
+	private tui: { requestRender: () => void };
+	private pollInterval: NodeJS.Timeout | null = null;
+	private disposed = false;
+	private cachedLines: string[] = [];
+	private cachedWidth = 0;
+	private version = 0;
+	private cachedVersion = -1;
+
+	constructor(
+		coordDir: string,
+		tui: { requestRender: () => void },
+		theme: Theme,
+	) {
+		this.coordDir = coordDir;
+		this.tui = tui;
+		this.theme = theme;
+		this.startPolling();
+	}
+
+	private startPolling(): void {
+		this.pollInterval = setInterval(() => {
+			if (this.disposed) return;
+			this.version++;
+			this.tui.requestRender();
+		}, POLL_INTERVAL_MS);
+	}
+
+	render(width: number): string[] {
+		if (width === this.cachedWidth && this.cachedVersion === this.version) {
+			return this.cachedLines;
+		}
+
+		const th = this.theme;
+		const state = this.readState();
+		const lines: string[] = [];
+		const innerWidth = width - 4;
+
+		if (!state) {
+			lines.push(this.border("top", innerWidth, "Coordination"));
+			lines.push(this.boxLine(th.fg("dim", "Loading..."), innerWidth));
+			lines.push(this.border("bottom", innerWidth));
+			this.cachedLines = lines;
+			this.cachedWidth = width;
+			this.cachedVersion = this.version;
+			return lines;
+		}
+
+		// Top border with title
+		lines.push(this.border("top", innerWidth, "Coordination"));
+
+		// Phase pipeline
+		lines.push(this.boxLine(this.renderPhasePipeline(state, innerWidth - 2), innerWidth));
+
+		// Tasks rows (can be multiple lines for active tasks)
+		for (const line of this.renderTasksRow(state, innerWidth - 2)) {
+			lines.push(this.boxLine(line, innerWidth));
+		}
+
+		// Workers rows (can be multiple lines for active workers)
+		for (const line of this.renderWorkersRow(state, innerWidth - 2)) {
+			lines.push(this.boxLine(line, innerWidth));
+		}
+
+		// Bottom border
+		lines.push(this.border("bottom", innerWidth));
+
+		this.cachedLines = lines;
+		this.cachedWidth = width;
+		this.cachedVersion = this.version;
+		return lines;
+	}
+
+	private border(type: "top" | "bottom", width: number, title?: string): string {
+		const th = this.theme;
+		const dim = (s: string) => th.fg("borderMuted", s);
+
+		if (type === "top") {
+			const titlePart = title ? ` ${title} ` : "";
+			const lineLen = width - titlePart.length;
+			return dim(" ╭") + dim("─") + th.fg("accent", titlePart) + dim("─".repeat(Math.max(0, lineLen - 2))) + dim("╮");
+		}
+		return dim(" ╰") + dim("─".repeat(width - 1)) + dim("╯");
+	}
+
+	private boxLine(content: string, width: number): string {
+		const th = this.theme;
+		const contentWidth = visibleWidth(content);
+		const padding = Math.max(0, width - contentWidth - 1);
+		return th.fg("borderMuted", " │") + content + " ".repeat(padding) + th.fg("borderMuted", "│");
+	}
+
+	private renderPhasePipeline(state: MiniDashboardState, width: number): string {
+		const th = this.theme;
+		const phases: PipelinePhase[] = ["scout", "planner", "workers", "review", "complete"];
+		const parts: string[] = [];
+
+		for (const phase of phases) {
+			const isCurrent = phase === state.currentPhase;
+			const isPast = this.isPhasePast(phase, state.currentPhase);
+			const isFailed = state.currentPhase === "failed";
+
+			let icon: string;
+			let name: string;
+
+			if (phase === state.currentPhase && isFailed) {
+				icon = th.fg("error", "✗");
+				name = th.fg("error", "failed");
+			} else if (isPast || phase === "complete" && state.currentPhase === "complete") {
+				icon = th.fg("success", "✓");
+				name = th.fg("dim", phase);
+			} else if (isCurrent) {
+				icon = th.fg("warning", "●");
+				name = th.fg("accent", phase);
+			} else {
+				icon = th.fg("dim", "○");
+				name = th.fg("dim", phase);
+			}
+
+			parts.push(`${icon} ${name}`);
+		}
+
+		const pipeline = parts.join(th.fg("dim", " → "));
+		const cost = th.fg("muted", formatCost(state.cost));
+		const time = th.fg("dim", state.elapsed);
+		const right = `${cost} ${th.fg("dim", "│")} ${time}`;
+
+		const leftWidth = visibleWidth(pipeline);
+		const rightWidth = visibleWidth(right);
+		const gap = Math.max(1, width - leftWidth - rightWidth);
+
+		return pipeline + " ".repeat(gap) + right;
+	}
+
+	private renderTasksRow(state: MiniDashboardState, width: number): string[] {
+		const th = this.theme;
+		const lines: string[] = [];
+
+		// Group tasks by status
+		const claimed = state.tasks.filter(t => t.status === "claimed");
+		const pending = state.tasks.filter(t => t.status === "pending");
+		const blocked = state.tasks.filter(t => t.status === "blocked");
+		const complete = state.tasks.filter(t => t.status === "complete");
+
+		const completed = complete.length;
+		const total = state.tasks.length;
+		const header = `${th.fg("muted", "Tasks:")} ${th.fg("success", String(completed))}${th.fg("dim", "/")}${th.fg("muted", String(total))}`;
+
+		// Summary line with counts
+		const summary: string[] = [];
+		if (claimed.length > 0) summary.push(th.fg("warning", `${claimed.length} active`));
+		if (pending.length > 0) summary.push(th.fg("dim", `${pending.length} pending`));
+		if (blocked.length > 0) summary.push(th.fg("dim", `${blocked.length} blocked`));
+		if (complete.length > 0) summary.push(th.fg("success", `${complete.length} done`));
+
+		lines.push(`${header} ${th.fg("dim", "│")} ${summary.join(th.fg("dim", ", "))}`);
+
+		// Show active tasks with descriptions
+		for (const task of claimed) {
+			const icon = th.fg("warning", "●");
+			const id = th.fg("accent", task.id);
+			const desc = this.truncateDesc(task.description, width - 20);
+			lines.push(`  ${icon} ${id} ${th.fg("muted", desc)}`);
+		}
+
+		return lines;
+	}
+
+	private renderWorkersRow(state: MiniDashboardState, width: number): string[] {
+		const th = this.theme;
+		const lines: string[] = [];
+
+		const completed = state.workers.filter(w => w.status === "complete").length;
+		const active = state.workers.filter(w => w.status === "working").length;
+		const total = state.workers.length;
+		const header = `${th.fg("muted", "Workers:")} ${th.fg("success", String(completed))}${th.fg("dim", "/")}${th.fg("muted", String(total))}`;
+
+		// Summary
+		const summary: string[] = [];
+		if (active > 0) summary.push(th.fg("warning", `${active} active`));
+		if (completed > 0) summary.push(th.fg("success", `${completed} done`));
+		const waiting = state.workers.filter(w => w.status === "waiting").length;
+		if (waiting > 0) summary.push(th.fg("dim", `${waiting} waiting`));
+
+		lines.push(`${header} ${th.fg("dim", "│")} ${summary.join(th.fg("dim", ", "))}`);
+
+		// Show active workers with tokens/cost/context/duration
+		for (const worker of state.workers.filter(w => w.status === "working")) {
+			const icon = th.fg("warning", "●");
+			const id = th.fg("accent", worker.id.slice(0, 4));
+			const task = worker.taskId ? th.fg("muted", worker.taskId) : th.fg("dim", "—");
+
+			// Format stats: tokens, context %, cost, duration
+			const tokens = worker.tokens !== undefined ? this.formatTokens(worker.tokens) : "—";
+			const contextPct = worker.contextPct !== undefined ? `${worker.contextPct.toFixed(1)}%` : "—";
+			const contextWindow = worker.contextWindow ? this.formatTokens(worker.contextWindow) : "200k";
+			const cost = worker.cost !== undefined ? `$${worker.cost.toFixed(2)}` : "—";
+			const duration = worker.durationMs ? formatDuration(worker.durationMs) : "—";
+			
+			// Color context % based on usage
+			let contextStr = `${contextPct}/${contextWindow}`;
+			if (worker.contextPct !== undefined) {
+				if (worker.contextPct > 90) {
+					contextStr = th.fg("error", contextStr);
+				} else if (worker.contextPct > 70) {
+					contextStr = th.fg("warning", contextStr);
+				} else {
+					contextStr = th.fg("success", contextStr);
+				}
+			} else {
+				contextStr = th.fg("dim", contextStr);
+			}
+
+			const stats = `${th.fg("dim", tokens)} ${contextStr} ${th.fg("dim", cost + ", " + duration)}`;
+
+			lines.push(`  ${icon} ${id} ${task} ${stats}`);
+		}
+
+		return lines;
+	}
+
+	private truncateDesc(desc: string, maxLen: number): string {
+		// Take first line only, truncate if needed
+		const firstLine = desc.split("\n")[0].trim();
+		if (firstLine.length <= maxLen) return firstLine;
+		return firstLine.slice(0, maxLen - 1) + "…";
+	}
+
+	private formatTokens(tokens: number): string {
+		if (tokens < 1000) return String(tokens);
+		if (tokens < 10000) return `${(tokens / 1000).toFixed(1)}k`;
+		return `${Math.round(tokens / 1000)}k`;
+	}
+
+	private isPhasePast(phase: PipelinePhase, currentPhase: string): boolean {
+		const order = PHASE_ORDER;
+		const phaseIdx = order.indexOf(phase);
+		const currentIdx = order.indexOf(currentPhase as PipelinePhase);
+		return phaseIdx < currentIdx && phaseIdx !== -1 && currentIdx !== -1;
+	}
+
+	invalidate(): void {
+		this.cachedWidth = 0;
+	}
+
+	dispose(): void {
+		this.disposed = true;
+		if (this.pollInterval) {
+			clearInterval(this.pollInterval);
+			this.pollInterval = null;
+		}
+	}
+
+	private readState(): MiniDashboardState | null {
+		try {
+			if (!fs.existsSync(this.coordDir)) return null;
+
+			const workers = readWorkerStatesSync(this.coordDir);
+			const costState = readJsonSync<CostState>(path.join(this.coordDir, "cost.json"));
+			const taskQueue = readJsonSync<TaskQueue>(path.join(this.coordDir, "tasks.json"));
+			const tasks = taskQueue?.tasks || [];
+
+			let currentPhase: PipelinePhase = "scout";
+			let startedAt = Date.now();
+
+			const checkpoint = readLatestCheckpointSync(this.coordDir);
+			if (checkpoint?.pipelineState) {
+				currentPhase = checkpoint.pipelineState.currentPhase;
+				startedAt = checkpoint.pipelineState.startedAt;
+			} else {
+				const progressPath = path.join(this.coordDir, "progress.md");
+				if (fs.existsSync(progressPath)) {
+					const content = fs.readFileSync(progressPath, "utf-8");
+					const parsed = parsePipelineFromProgress(content);
+					if (parsed.currentPhase) currentPhase = parsed.currentPhase;
+					if (parsed.startedAt) startedAt = parsed.startedAt;
+				}
+			}
+
+			// Find taskId for each worker from the task queue
+			const workerTaskMap = new Map<string, string>();
+			for (const task of tasks) {
+				if (task.claimedBy && task.status === "claimed") {
+					workerTaskMap.set(task.claimedBy, task.id);
+				}
+			}
+
+			// Default context window (Claude Sonnet = 200k)
+			const defaultContextWindow = 200000;
+
+			return {
+				currentPhase,
+				cost: costState?.total || 0,
+				elapsed: formatDuration(Date.now() - startedAt),
+				workers: workers.map(w => {
+					const tokens = w.tokens ?? (w.usage ? w.usage.input + w.usage.output : undefined);
+					const contextWindow = defaultContextWindow;
+					const contextPct = tokens !== undefined ? (tokens / contextWindow) * 100 : undefined;
+					
+					return {
+						id: w.id,
+						status: w.status,
+						taskId: workerTaskMap.get(w.id),
+						tokens,
+						contextPct,
+						contextWindow,
+						cost: w.usage?.cost,
+						durationMs: w.durationMs ?? (w.startedAt ? Date.now() - w.startedAt : undefined),
+					};
+				}),
+				tasks: tasks.map(t => ({
+					id: t.id,
+					status: t.status,
+					description: t.description,
+				})),
+			};
+		} catch {
+			return null;
+		}
+	}
+}
+
+interface MiniDashboardState {
+	currentPhase: PipelinePhase;
+	cost: number;
+	elapsed: string;
+	workers: { 
+		id: string; 
+		status: string; 
+		taskId?: string; 
+		tokens?: number;
+		contextPct?: number;
+		contextWindow?: number;
+		cost?: number; 
+		durationMs?: number;
+	}[];
+	tasks: { id: string; status: string; description: string }[];
 }

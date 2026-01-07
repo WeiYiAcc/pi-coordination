@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { createCoordinateTool } from "./coordinate/index.js";
 import { createCoordOutputTool } from "./coord-output/index.js";
-import { CoordinationDashboard, MiniFooter } from "./coordinate/dashboard.js";
+import { CoordinationDashboard, MiniFooter, MiniDashboard } from "./coordinate/dashboard.js";
 
 interface CoordinationResult {
 	asyncId: string;
@@ -113,34 +113,64 @@ function readCost(coordDir: string): number | undefined {
 	}
 }
 
+// Track active mini dashboard instances for cleanup
+const activeDashboards = new Map<string, MiniDashboard>();
+
 function renderWidget(ctx: ExtensionContext, jobs: AsyncJobState[]): void {
 	if (!ctx.hasUI) return;
+
+	// Clean up dashboards for jobs that are no longer active
+	for (const [id, dashboard] of activeDashboards) {
+		if (!jobs.find(j => j.asyncId === id)) {
+			dashboard.dispose?.();
+			activeDashboards.delete(id);
+		}
+	}
+
 	if (jobs.length === 0) {
 		ctx.ui.setWidget(WIDGET_KEY, undefined);
 		return;
 	}
 
-	const theme = ctx.ui.theme;
-	const lines: string[] = [];
-	lines.push(theme.fg("accent", "Async coordination"));
+	// For now, show the first job's mini dashboard
+	// (multi-job support could show a switcher or stacked view)
+	const job = jobs.find(j => j.status === "running" || j.status === "queued") ?? jobs[0];
 
-	for (const job of jobs.slice(0, MAX_WIDGET_JOBS)) {
-		const id = job.asyncId.slice(0, 6);
-		const phase = job.phase ?? "unknown";
-		const completed = job.workerCompleted ?? 0;
-		const total = job.workerTotal ?? "?";
-		const cost = typeof job.cost === "number" ? ` $${job.cost.toFixed(2)}` : "";
-		const status =
-			job.status === "complete"
-				? theme.fg("success", "complete")
-				: job.status === "failed"
-					? theme.fg("error", "failed")
-					: theme.fg("warning", "running");
-
-		lines.push(`- ${id} ${status} | ${phase} | ${completed}/${total}${cost}`);
+	if (!job.coordDir || !fs.existsSync(job.coordDir)) {
+		// Fallback to simple text if coordDir not available
+		const theme = ctx.ui.theme;
+		const lines: string[] = [];
+		lines.push(theme.fg("accent", "Async coordination"));
+		for (const j of jobs.slice(0, MAX_WIDGET_JOBS)) {
+			const id = j.asyncId.slice(0, 6);
+			const phase = j.phase ?? "unknown";
+			const completed = j.workerCompleted ?? 0;
+			const total = j.workerTotal ?? "?";
+			const cost = typeof j.cost === "number" ? ` $${j.cost.toFixed(2)}` : "";
+			const status =
+				j.status === "complete"
+					? theme.fg("success", "complete")
+					: j.status === "failed"
+						? theme.fg("error", "failed")
+						: theme.fg("warning", "running");
+			lines.push(`- ${id} ${status} | ${phase} | ${completed}/${total}${cost}`);
+		}
+		ctx.ui.setWidget(WIDGET_KEY, lines);
+		return;
 	}
 
-	ctx.ui.setWidget(WIDGET_KEY, lines);
+	// Use the MiniDashboard component for rich display
+	ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => {
+		// Dispose previous dashboard for this job if exists
+		const existing = activeDashboards.get(job.asyncId);
+		if (existing) {
+			existing.dispose?.();
+		}
+
+		const dashboard = new MiniDashboard(job.coordDir, tui, theme);
+		activeDashboards.set(job.asyncId, dashboard);
+		return dashboard;
+	});
 }
 
 export default function registerCoordinationExtension(pi: ExtensionAPI): void {
@@ -152,8 +182,8 @@ export default function registerCoordinationExtension(pi: ExtensionAPI): void {
 	let poller: NodeJS.Timeout | null = null;
 	let dashboardFooterInstalled = false;
 
-	pi.registerCommand("coord", {
-		description: "Open coordination dashboard for async jobs",
+	pi.registerCommand("jobs", {
+		description: "Coordination dashboard - live worker progress, tasks, costs",
 		handler: async (_args, ctx) => {
 			if (!ctx.hasUI) {
 				ctx.ui.notify("Dashboard requires interactive mode", "error");
@@ -279,6 +309,11 @@ export default function registerCoordinationExtension(pi: ExtensionAPI): void {
 		if (poller) clearInterval(poller);
 		poller = null;
 		asyncJobs.clear();
+		// Dispose all active mini dashboards
+		for (const dashboard of activeDashboards.values()) {
+			dashboard.dispose?.();
+		}
+		activeDashboards.clear();
 		ctx.ui.setWidget(WIDGET_KEY, undefined);
 		if (dashboardFooterInstalled) {
 			ctx.ui.setFooter(undefined);

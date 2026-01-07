@@ -1,26 +1,27 @@
 # pi-coordination
 
-Multi-agent coordination system for [pi](https://github.com/badlogic/pi-mono). Enables parallel plan execution with dependency management, contracts between workers, review cycles, and real-time TUI visibility.
+Multi-agent coordination for [pi](https://github.com/badlogic/pi-mono). Parallel task execution with dependencies, contracts, review cycles, and real-time visibility.
 
-## Philosophy: Why This Works
+> **Ralph Wiggum on steroids** — the same single-task-per-agent pattern, scaled with parallelism and coordination. If Ralph is a solo developer with a todo list, pi-coordination is a team with a project manager, code reviewer, and task board.
 
-Pi-coordination is built on the "Ralph Wiggum" insight: LLMs work better when focused on ONE task with a fresh context, rather than juggling an entire spec at once.
+## Philosophy
 
-**The Core Pattern:**
-- **Stateless agents** - Fresh context each time, no accumulated confusion
-- **Stateful files** - `tasks.json` tracks progress, survives crashes
-- **One task per agent** - Focused execution, no context overload
-- **Persistent memory** - `events.jsonl` and worker state files, not agent memory
+Agents work better focused on ONE task with fresh context, rather than juggling an entire spec at once.
 
-**What we add to the basic pattern:**
-- **Parallel execution** - N workers instead of 1
-- **Task dependencies** - Blocked until prerequisites complete
-- **Contracts** - Cross-worker coordination for shared types/APIs
-- **File reservations** - Prevent conflicts on shared files
-- **Review cycles** - Dedicated quality gate after workers complete
-- **Real-time monitoring** - TUI dashboard for visibility
+A **plan** here isn't a sequential checklist — it's a **task graph**. Independent tasks run in parallel; dependent tasks wait for prerequisites. Workers continuously spawn as tasks become available, and new tasks can be discovered mid-run.
 
-Think of it as "Ralph Wiggum on steroids" - the same proven single-task-per-agent pattern, scaled up with parallelism and coordination primitives. If Ralph is a solo developer with a todo list, pi-coordination is a team with a project manager, code reviewer, and task board.
+**Core pattern** (shared with Ralph Wiggum):
+- **Stateless agents** — Fresh context each time, no accumulated confusion
+- **Stateful files** — `tasks.json` tracks progress, survives crashes
+- **One task per agent** — Focused execution, no context overload
+
+**What we add:**
+- **Parallel execution** — N workers instead of 1
+- **Task graph** — Dependencies, not sequence
+- **Contracts** — Cross-worker coordination for shared types/APIs
+- **File reservations** — Prevent conflicts on shared files
+- **Review cycles** — Dedicated quality gate after workers complete
+- **Real-time monitoring** — TUI dashboard for visibility
 
 ## Features
 
@@ -39,7 +40,7 @@ Think of it as "Ralph Wiggum on steroids" - the same proven single-task-per-agen
 - **Artifacts + Truncation**: Full prompt/output JSONL artifacts with optional output truncation
 - **Checkpointing**: Save/restore at phase boundaries for resumable sessions
 - **Real-time TUI**: Phase timeline, worker status, and event stream
-- **Coordination Dashboard**: Full-screen `/coord` command for monitoring async jobs
+- **Coordination Dashboard**: Full-screen `/jobs` command for monitoring async coordination
 - **Coordination Logs**: Comprehensive markdown logs with executive summary
 - **Full Observability**: Events, spans, causality tracking, snapshots, structured errors
 - **Validation Layer**: Invariant checking, content validation, streaming warnings, markdown reports
@@ -309,7 +310,7 @@ Coordination Complete (2m 34s total, $0.89)
 
 ## Coordination Dashboard
 
-For async coordination jobs, use the `/coord` command to open a full-screen dashboard:
+For async coordination jobs, use the `/jobs` command to open a full-screen dashboard:
 
 ```
 ─ Coordination ──────────────────────────────────────────────────────────
@@ -354,7 +355,7 @@ By Worker: 04ea $0.45 | 52e2 $0.38 | a3f1 $0.22
 
 **Mini Footer:** After exiting with `q`, a compact status line shows in the main UI:
 ```
-[coord] workers ● 2/4 | $1.23 | 3m45s | /coord to open
+[coord] workers ● 2/4 | $1.23 | 3m45s | /jobs to open
 ```
 
 ## Plan Format
@@ -622,7 +623,7 @@ extensions/coordination/           # Symlinked to ~/.pi/agent/extensions/coordin
 │
 ├── coordinate/                   # Coordination runtime
 │   ├── index.ts                  # coordinate() tool
-│   ├── dashboard.ts              # /coord command TUI
+│   ├── dashboard.ts              # /jobs command TUI + MiniDashboard widget
 │   ├── pipeline.ts               # Multi-phase orchestration
 │   ├── state.ts                  # FileBasedStorage
 │   ├── task-queue.ts             # TaskQueueManager
