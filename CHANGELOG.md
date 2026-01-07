@@ -67,6 +67,14 @@ All notable changes to pi-coordination.
 - **Event type consistency** - Added `review_completed` handler (pipeline emits this, was only handling `review_complete`)
 - **Event shortId for review_completed** - Added to sys events array so it shows `[sys]` not `[??]`
 - **Context % capped at 100%** - `formatContextUsage` and worker display no longer show >100%
+- **Memorable worker names** - Workers get Docker-style names like `swift_fox`, `calm_owl` (60×60 = 3600 combinations)
+- **File reservations display** - Dashboard shows which files each worker owns in dedicated section
+- **Name consistency fix** - Worker names now use `identity` (not UUID) to match reservation display
+- **Completed table uses memorable names** - Final summary table shows `swift_fox` instead of `a1b2`
+- **Empty reservations header fix** - Don't show "File reservations:" if all are released
+- **Name column width fix** - Increased to 13 chars (max name is "bright_badger")
+- **truncateText edge case** - Handle negative/small maxLen values gracefully
+- **Hash distribution fix** - Noun selection now uses division instead of bit-shift for more uniform distribution
 - **Completed state total cost** - Now uses full `costState.total` (includes scout/planner/coordinator/review), not just worker sum
 
 ---

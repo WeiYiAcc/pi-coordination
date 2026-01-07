@@ -355,24 +355,28 @@ For async coordination jobs, use the `/jobs` command to open a full-screen dashb
 Pipeline: [scout ✓] → [planner ✓] → [workers ●] → [review] → [complete]
 Cost: $1.23 / $40.00 limit                             Elapsed: 3m 45s
 ─ Task Queue (6) ────────────────────────────────────────────────────────
-● task-1    Create user types         claimed     worker:04ea
+● task-1    Create user types         claimed     swift_fox
 ○ task-2    Implement auth service    pending     deps: task-1
-✓ task-3    Setup database schema     complete    worker:52e2
+✓ task-3    Setup database schema     complete    calm_owl
 ─ Workers (4) ───────────────────────────────────────────────────────────
-→ 04ea   types.ts       ● working    1m23s   $0.45    12 turns
-  52e2   store.ts       ✓ complete   2m01s   $0.38    8 turns
-  a3f1   handlers.ts    ● working    0m45s   $0.22    5 turns
-  b2c4   ----           ○ waiting    0m12s   $0.00    0 turns
+→ swift_fox     types.ts       ● working    1m23s   $0.45    45%
+  calm_owl      store.ts       ✓ complete   2m01s   $0.38    
+  bold_hawk     handlers.ts    ● working    0m45s   $0.22    32%
+  keen_deer     ----           ○ waiting    0m12s   $0.00    
+─ File Reservations ─────────────────────────────────────────────────────
+swift_fox → types.ts, user.ts
+bold_hawk → handlers.ts, routes.ts
 ─ Events ────────────────────────────────────────────────────────────────
-+1m23s  [04ea] write src/types.ts
-+1m45s  [52e2] completed
-+2m01s  [a3f1] read src/handlers.ts
++1m23s  [swift] write src/types.ts
++1m45s  [calm] completed
++2m01s  [bold] read src/handlers.ts
 ─ Cost Breakdown ────────────────────────────────────────────────────────
 By Phase: scout $0.12 | planner $0.34 | workers $0.77
-By Worker: 04ea $0.45 | 52e2 $0.38 | a3f1 $0.22
 
 [j/k] select  [Enter] details  [w]rap up  [R]estart  [A]bort  [t]asks  [q]uit
 ```
+
+Workers get memorable Docker-style names (e.g., `swift_fox`, `calm_owl`) for easy identification across the dashboard, events, and file reservations.
 
 **Overlays:**
 - **Worker Details** (Enter): Stats, files modified, recent tools, output

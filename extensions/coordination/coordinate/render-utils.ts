@@ -4,7 +4,54 @@
 
 import type { Theme } from "@mariozechner/pi-coding-agent";
 import { visibleWidth } from "@mariozechner/pi-tui";
-import type { PipelinePhase, PhaseResult, WorkerStateFile, Task, CoordinationEvent } from "./types.js";
+import type { PipelinePhase, PhaseResult, WorkerStateFile, Task, CoordinationEvent, FileReservation } from "./types.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Memorable Names (Docker-style adjective_noun)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ADJECTIVES = [
+	"swift", "calm", "bold", "keen", "wise", "fair", "warm", "cool", "bright", "quick",
+	"sharp", "smart", "brave", "kind", "neat", "proud", "eager", "happy", "witty", "noble",
+	"agile", "clever", "steady", "lively", "gentle", "fierce", "silent", "vivid", "mellow", "crisp",
+	"sleek", "plush", "brisk", "deft", "spry", "zesty", "perky", "snug", "tidy", "cozy",
+	"lucid", "frank", "prime", "fleet", "grand", "stout", "fresh", "clear", "light", "pure",
+	"dusty", "misty", "foggy", "sunny", "rainy", "snowy", "windy", "stormy", "frosty", "dewy",
+];
+
+const NOUNS = [
+	"fox", "owl", "wolf", "bear", "hawk", "lynx", "deer", "hare", "crow", "dove",
+	"pike", "bass", "wren", "swan", "moth", "wasp", "toad", "newt", "crab", "seal",
+	"elm", "oak", "pine", "fern", "moss", "reed", "vine", "rose", "lily", "sage",
+	"finch", "robin", "egret", "heron", "otter", "badger", "stoat", "vole", "shrew", "mole",
+	"trout", "perch", "carp", "bream", "squid", "conch", "clam", "snail", "slug", "ant",
+	"birch", "maple", "cedar", "aspen", "alder", "willow", "holly", "ivy", "daisy", "tulip",
+];
+
+// Cache to ensure same workerId always gets same name within a session
+const nameCache = new Map<string, string>();
+
+export function generateMemorableName(workerId: string): string {
+	if (nameCache.has(workerId)) {
+		return nameCache.get(workerId)!;
+	}
+	
+	// Simple hash from workerId to pick adjective + noun
+	let hash = 0;
+	for (let i = 0; i < workerId.length; i++) {
+		hash = ((hash << 5) - hash) + workerId.charCodeAt(i);
+		hash = hash & hash; // Convert to 32-bit int
+	}
+	hash = Math.abs(hash);
+	
+	// Use division for more uniform distribution of both indices
+	const adj = ADJECTIVES[hash % ADJECTIVES.length];
+	const noun = NOUNS[Math.floor(hash / ADJECTIVES.length) % NOUNS.length];
+	const name = `${adj}_${noun}`;
+	
+	nameCache.set(workerId, name);
+	return name;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Icons
@@ -74,6 +121,7 @@ export function formatContextUsage(tokens: number, maxTokens = 200000): string {
 }
 
 export function truncateText(text: string, maxLen: number): string {
+	if (maxLen < 4) return text.slice(0, Math.max(0, maxLen)); // Can't fit "..." if < 4 chars
 	if (text.length <= maxLen) return text;
 	return text.slice(0, maxLen - 3) + "...";
 }
@@ -184,6 +232,7 @@ export function renderCostBreakdown(
 export interface WorkerDisplayState {
 	id: string;
 	shortId: string;
+	name: string; // Memorable name like "swift_fox"
 	status: string;
 	taskId?: string;
 	tokens?: number;
@@ -199,6 +248,7 @@ export function workerStateToDisplay(w: WorkerStateFile): WorkerDisplayState {
 	return {
 		id: w.id,
 		shortId: w.shortId || w.id.slice(0, 4),
+		name: generateMemorableName(w.identity), // Use identity to match reservations
 		status: w.status,
 		taskId: w.currentStep ? `TASK-${String(w.currentStep).padStart(2, "0")}` : undefined,
 		tokens: contextTokens,
@@ -240,7 +290,7 @@ export function renderWorkersCompact(
 	const active = workers.filter(w => w.status === "working" || w.status === "waiting");
 	for (const w of active.slice(0, 4)) {
 		const icon = theme.fg(getStatusColor(w.status), getSpinnerFrame());
-		const id = theme.fg("accent", w.shortId);
+		const name = theme.fg("accent", w.name.padEnd(13)); // Max name is 13 chars (e.g., "bright_badger")
 		const time = theme.fg("dim", formatDuration(w.durationMs));
 		const cost = theme.fg("muted", formatCost(w.cost));
 		const ctx = w.contextPct ? theme.fg("dim", `${w.contextPct}%`) : "";
@@ -248,17 +298,53 @@ export function renderWorkersCompact(
 		// Show current activity: tool + file
 		let activity = "";
 		if (w.currentTool) {
-			const file = w.currentFile ? ` ${truncateText(w.currentFile.split("/").pop() || "", 20)}` : "";
+			const file = w.currentFile ? ` ${truncateText(w.currentFile.split("/").pop() || "", 15)}` : "";
 			activity = theme.fg("dim", `${w.currentTool}${file}`);
 		}
 		
-		lines.push(`  ${icon} ${id} ${time} ${cost} ${ctx} ${activity}`);
+		lines.push(`  ${icon} ${name} ${time} ${cost} ${ctx} ${activity}`);
 	}
 
 	if (active.length > 4) {
 		lines.push(theme.fg("dim", `  ... +${active.length - 4} more`));
 	}
 
+	return lines;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// File reservations rendering
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function renderFileReservations(
+	reservations: FileReservation[],
+	theme: Theme,
+	width: number,
+): string[] {
+	if (reservations.length === 0) return [];
+	
+	// Group by agent (worker), filtering out released reservations
+	const byAgent = new Map<string, string[]>();
+	for (const r of reservations) {
+		if (r.releasedAt) continue; // Skip released
+		const files = byAgent.get(r.agent) || [];
+		files.push(...r.patterns);
+		byAgent.set(r.agent, files);
+	}
+	
+	// Don't show header if all reservations were released
+	if (byAgent.size === 0) return [];
+	
+	const lines: string[] = [];
+	lines.push(theme.fg("muted", "File reservations:"));
+	
+	for (const [agent, files] of byAgent) {
+		const name = generateMemorableName(agent);
+		const fileList = files.map(f => f.split("/").pop() || f).join(", ");
+		const truncated = truncateText(fileList, width - name.length - 8);
+		lines.push(`  ${theme.fg("accent", name)} → ${theme.fg("dim", truncated)}`);
+	}
+	
 	return lines;
 }
 

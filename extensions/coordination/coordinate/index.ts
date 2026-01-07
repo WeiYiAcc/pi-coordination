@@ -23,12 +23,14 @@ import {
 	renderPipelineRow,
 	renderCostBreakdown,
 	renderWorkersCompact,
+	renderFileReservations,
 	renderTasksCompact,
 	renderEventLine,
 	drawBoxTop,
 	drawBoxBottom,
 	drawBoxLine,
 	workerStateToDisplay,
+	generateMemorableName,
 	type PipelineDisplayState,
 	type WorkerDisplayState,
 	type TaskDisplayState,
@@ -94,7 +96,7 @@ import {
 	runPlannerPhaseWrapper,
 	runReviewFixLoop,
 } from "./pipeline.js";
-import type { CoordinationState, CoordinationEvent, WorkerStateFile, WorkerStatus, CoordinationStatus, PipelinePhase, PhaseResult, CostState } from "./types.js";
+import type { CoordinationState, CoordinationEvent, WorkerStateFile, WorkerStatus, CoordinationStatus, PipelinePhase, PhaseResult, CostState, FileReservation } from "./types.js";
 import type { ReviewResult } from "./phases/review.js";
 import { ObservabilityContext } from "./observability/index.js";
 import { validateCoordination } from "./validation/index.js";
@@ -172,6 +174,7 @@ interface CoordinationDetails {
 		fixCycle: number;
 	};
 	cost?: CostState;
+	reservations?: FileReservation[];
 	validation?: ValidationResult;
 	async?: {
 		id: string;
@@ -713,7 +716,8 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 		state?: CoordinationState,
 		workerStates?: WorkerStateFile[],
 		events?: CoordinationEvent[],
-		pendingAgents?: string[]
+		pendingAgents?: string[],
+		reservations?: FileReservation[]
 	): CoordinationDetails => {
 		const workers: WorkerInfo[] = (workerStates || []).map(w => ({
 			id: w.id,
@@ -752,6 +756,7 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 				fixCycle: pipelineState.fixCycle,
 			},
 			cost: costState,
+			reservations: reservations || [],
 		};
 	};
 
@@ -785,14 +790,15 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 			storage.getState().then(async state => {
 				const workerStates = await storage.listWorkerStates();
 				const events = await storage.getEvents();
+				const reservations = await storage.getActiveReservations();
 				onUpdate({
 					content: [{ type: "text", text: "coordinating..." }],
-					details: makeCoordDetails(result, state, workerStates, events, normalizeAgents(params.agents)),
+					details: makeCoordDetails(result, state, workerStates, events, normalizeAgents(params.agents), reservations),
 				});
 			}).catch(() => {
 				onUpdate({
 					content: [{ type: "text", text: "working..." }],
-					details: makeCoordDetails(result, undefined, undefined, undefined, normalizeAgents(params.agents)),
+					details: makeCoordDetails(result, undefined, undefined, undefined, normalizeAgents(params.agents), []),
 				});
 			});
 		}
@@ -839,6 +845,7 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 			const state = await storage.getState();
 			const workerStates = await storage.listWorkerStates();
 			const events = await storage.getEvents();
+			const reservations = await storage.getActiveReservations();
 
 			const aggregateCost = workerStates.reduce((sum, w) => sum + w.usage.cost, 0);
 			const currentMilestone = Math.floor(aggregateCost / 0.25) * 0.25;
@@ -856,7 +863,7 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 			if (onUpdate) {
 				onUpdate({
 					content: [{ type: "text", text: "coordinating..." }],
-					details: makeCoordDetails(lastCoordResult, state, workerStates, events, normalizeAgents(params.agents)),
+					details: makeCoordDetails(lastCoordResult, state, workerStates, events, normalizeAgents(params.agents), reservations),
 				});
 			}
 			emitProgress(state, workerStates);
@@ -969,10 +976,11 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 		const finalState = await storage.getState();
 		const workerStates = await storage.listWorkerStates();
 		const events = await storage.getEvents();
+		const finalReservations = await storage.getActiveReservations();
 		const completedAt = Date.now();
 
 		const detailsWithPipeline: CoordinationDetails = {
-			...makeCoordDetails(coordinatorResult, finalState, workerStates, events, normalizeAgents(params.agents)),
+			...makeCoordDetails(coordinatorResult, finalState, workerStates, events, normalizeAgents(params.agents), finalReservations),
 			pipeline: {
 				currentPhase: pipelineState.currentPhase,
 				phases: pipelineState.phases,
@@ -1311,14 +1319,15 @@ export function createCoordinateTool(events: EventBus): ToolDefinition<typeof Co
 				container.addChild(new Text(drawBoxLine(summaryLine, width, theme), 0, 0));
 				container.addChild(new Text(drawBoxLine("", width, theme), 0, 0));
 
-				// Worker table header
-				const tableHeader = `${theme.fg("dim", "Worker")}      ${theme.fg("dim", "Time")}    ${theme.fg("dim", "Cost")}    ${theme.fg("dim", "Turns")}  ${theme.fg("dim", "Files")}`;
+				// Worker table header (13 chars for name - max is "bright_badger")
+				const tableHeader = `  ${theme.fg("dim", "Worker".padEnd(13))} ${theme.fg("dim", "Time".padEnd(8))} ${theme.fg("dim", "Cost".padEnd(8))} ${theme.fg("dim", "Turns".padEnd(6))} ${theme.fg("dim", "Files")}`;
 				container.addChild(new Text(drawBoxLine(tableHeader, width, theme), 0, 0));
 
 				for (const w of workers) {
 					const statusIcon = w.status === "complete"
 						? theme.fg("success", ICONS.complete)
 						: theme.fg("error", ICONS.failed);
+					const name = generateMemorableName(w.identity);
 					const time = w.completedAt && w.startedAt
 						? formatDuration(w.completedAt - w.startedAt)
 						: "--";
@@ -1327,7 +1336,7 @@ export function createCoordinateTool(events: EventBus): ToolDefinition<typeof Co
 					const files = w.filesModified.slice(0, 2).map(f => path.basename(f)).join(", ") +
 						(w.filesModified.length > 2 ? "..." : "");
 
-					const row = `${statusIcon} ${theme.fg("accent", w.shortId.padEnd(8))} ${time.padEnd(8)} ${cost.padEnd(8)} ${turns.padEnd(6)} ${theme.fg("dim", files)}`;
+					const row = `${statusIcon} ${theme.fg("accent", name.padEnd(13))} ${time.padEnd(8)} ${cost.padEnd(8)} ${turns.padEnd(6)} ${theme.fg("dim", files)}`;
 					container.addChild(new Text(drawBoxLine(row, width, theme), 0, 0));
 				}
 
@@ -1375,6 +1384,14 @@ export function createCoordinateTool(events: EventBus): ToolDefinition<typeof Co
 					line += theme.fg("dim", `+${details.pendingAgents.length - 4} more`);
 				}
 				container.addChild(new Text(drawBoxLine(line, width, theme), 0, 0));
+			}
+
+			// File reservations section
+			if (details.reservations && details.reservations.length > 0) {
+				const reservationLines = renderFileReservations(details.reservations, theme, width - 4);
+				for (const line of reservationLines) {
+					container.addChild(new Text(drawBoxLine(line, width, theme), 0, 0));
+				}
 			}
 
 			container.addChild(new Text(drawBoxBottom(width, theme), 0, 0));
