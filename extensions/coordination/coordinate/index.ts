@@ -1439,6 +1439,32 @@ export function createCoordinateTool(events: EventBus): ToolDefinition<typeof Co
 						case "cost_limit_reached":
 							line += theme.fg("warning", `cost limit reached: $${(ev as { total: number }).total.toFixed(2)}`);
 							break;
+						case "session_started":
+							line += theme.fg("muted", "session started");
+							break;
+						case "session_completed":
+							line += theme.fg("success", "session completed");
+							break;
+						case "phase_started":
+							line += theme.fg("muted", `phase ${(ev as { phase?: string }).phase || "?"} started`);
+							break;
+						case "phase_completed":
+							line += theme.fg("success", `phase ${(ev as { phase?: string }).phase || "?"} done`);
+							break;
+						case "cost_updated":
+							line += theme.fg("dim", `cost: $${((ev as { total?: number }).total || 0).toFixed(2)}`);
+							break;
+						case "checkpoint_saved":
+							line += theme.fg("dim", "checkpoint");
+							break;
+						case "planner_review_started":
+							line += theme.fg("muted", "reviewing tasks");
+							break;
+						case "planner_review_complete":
+							line += theme.fg("success", "tasks approved");
+							break;
+						default:
+							line += theme.fg("dim", (ev as { type: string }).type);
 					}
 
 					container.addChild(new Text(line, 0, 0));
