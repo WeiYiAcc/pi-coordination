@@ -729,6 +729,16 @@ skills/coordination/              # Symlinked to ~/.pi/agent/skills/coordination
 └── SKILL.md
 ```
 
+## Credits
+
+Inspired by and built on ideas from:
+
+- **[RepoPrompt](https://repoprompt.com/)** by [@pvncher](https://x.com/pvncher) — The original scout/context bundling approach
+- **[Ralph Wiggum Loop](https://ghuntley.com/ralph/)** by [@GeoffreyHuntley](https://x.com/GeoffreyHuntley) — One task per agent, fresh context each time
+- **[MCP Agent Mail](https://github.com/Dicklesworthstone/mcp_agent_mail)** by [@doodlestein](https://x.com/doodlestein) — Agent-to-agent messaging and file reservations
+- **[Beads](https://github.com/steveyegge/beads)** by [@Steve_Yegge](https://x.com/Steve_Yegge) — Task graph decomposition patterns
+- **[pi](https://github.com/badlogic/pi-mono/)** by [@badlogicgames](https://x.com/badlogicgames) — The agent framework powering all of this
+
 ## License
 
 MIT
