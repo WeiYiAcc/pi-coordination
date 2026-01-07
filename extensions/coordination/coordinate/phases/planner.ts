@@ -6,7 +6,7 @@ import { runSingleAgent, type AgentRuntime } from "../../subagent/runner.js";
 import { discoverAgents } from "../../subagent/agents.js";
 import { TaskQueueManager } from "../task-queue.js";
 import type { Task } from "../types.js";
-import type { OutputLimits } from "../../subagent/types.js";
+import type { OnUpdateCallback, OutputLimits } from "../../subagent/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLANNER_EXTENSION_PATH = path.resolve(__dirname, "../../planner.ts");
@@ -18,6 +18,7 @@ export interface PlannerPhaseConfig {
 	outputLimits?: OutputLimits;
 	agentName?: string;
 	scoutContextPath?: string;
+	onProgress?: OnUpdateCallback; // Stream progress updates
 }
 
 export interface PlannerResult {
@@ -138,7 +139,7 @@ Output ONLY the final JSON object after self-review, no other text.`;
 		runtime.cwd,
 		undefined,
 		signal,
-		undefined,
+		config.onProgress,
 		(results) => ({ mode: "single", results, agentScope: "user", projectAgentsDir: null }),
 		{
 			outputLimits: config.outputLimits,

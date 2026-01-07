@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { runSingleAgent, type AgentRuntime } from "../../subagent/runner.js";
 import { discoverAgents } from "../../subagent/agents.js";
-import type { OutputLimits } from "../../subagent/types.js";
+import type { OnUpdateCallback, OutputLimits } from "../../subagent/types.js";
 
 export interface ScoutConfig {
 	depth: "shallow" | "deep";
@@ -13,6 +13,7 @@ export interface ScoutConfig {
 	tokenBudget?: number;
 	agentName?: string;
 	customMetaPrompt?: string; // Path or inline content for custom meta guidance
+	onProgress?: OnUpdateCallback; // Stream progress updates
 }
 
 export interface ScoutResult {
@@ -140,7 +141,7 @@ Save output to: ${config.outputDir}/main.md`;
 		runtime.cwd,
 		undefined,
 		signal,
-		undefined,
+		config.onProgress,
 		(results) => ({ mode: "single", results, agentScope: "user", projectAgentsDir: null }),
 		{ outputLimits: config.outputLimits, artifactsDir: path.join(coordDir, "artifacts"), artifactLabel: "scout" },
 	);

@@ -242,6 +242,21 @@ export async function runScoutPhaseWrapper(
 			maxFileSize: 50000,
 			outputLimits: config.maxOutput,
 			model: config.models?.scout,
+			onProgress: (update) => {
+				// Stream scout progress to coordination events
+				const details = update.details as { results?: Array<{ recentTools?: Array<{ tool: string; file?: string }> }> };
+				const recentTools = details?.results?.[0]?.recentTools;
+				if (recentTools && recentTools.length > 0) {
+					const latest = recentTools[0];
+					ctx.storage.appendEvent({
+						type: "tool_call",
+						tool: latest.tool,
+						file: latest.file,
+						workerId: "scout",
+						timestamp: Date.now(),
+					}).catch(() => {});
+				}
+			},
 		};
 
 		const result = await runScoutPhase(
@@ -310,6 +325,21 @@ export async function runPlannerPhaseWrapper(
 			maxSelfReviewCycles: config.planner.maxSelfReviewCycles || 5,
 			outputLimits: config.maxOutput,
 			model: config.models?.planner,
+			onProgress: (update) => {
+				// Stream planner progress to coordination events
+				const details = update.details as { results?: Array<{ recentTools?: Array<{ tool: string; file?: string }> }> };
+				const recentTools = details?.results?.[0]?.recentTools;
+				if (recentTools && recentTools.length > 0) {
+					const latest = recentTools[0];
+					ctx.storage.appendEvent({
+						type: "tool_call",
+						tool: latest.tool,
+						file: latest.file,
+						workerId: "planner",
+						timestamp: Date.now(),
+					}).catch(() => {});
+				}
+			},
 		};
 
 		await ctx.obs?.events.emit({

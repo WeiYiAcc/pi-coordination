@@ -1387,14 +1387,19 @@ export function createCoordinateTool(events: EventBus): ToolDefinition<typeof Co
 				for (const ev of recentEvents) {
 					const elapsed = `+${((ev.timestamp - firstTs) / 1000).toFixed(1)}s`;
 					let shortId: string;
+					const workerId = (ev as { workerId?: string }).workerId;
 					if (ev.type === "cost_milestone" || ev.type === "cost_limit_reached") {
 						shortId = "$";
-					} else if (ev.type === "phase_complete") {
+					} else if (ev.type === "phase_complete" || ev.type === "phase_completed" || ev.type === "phase_started" || ev.type === "session_started" || ev.type === "session_completed" || ev.type === "checkpoint_saved" || ev.type === "cost_updated") {
 						shortId = "sys";
-					} else if (ev.type === "coordinator") {
+					} else if (ev.type === "coordinator" || ev.type === "planner_review_started" || ev.type === "planner_review_complete") {
 						shortId = "co";
+					} else if (workerId === "scout") {
+						shortId = "scout";
+					} else if (workerId === "planner") {
+						shortId = "plan";
 					} else {
-						shortId = (ev as { workerId?: string }).workerId?.slice(0, 4) || "??";
+						shortId = workerId?.slice(0, 4) || "??";
 					}
 
 					let line = `${theme.fg("muted", elapsed.padEnd(8))}`;
