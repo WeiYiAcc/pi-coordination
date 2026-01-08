@@ -153,7 +153,12 @@ coordinate({
 })
 ```
 
-**Model Resolution**: When multiple providers offer the same model ID, resolution follows provider registration order: `openai-codex` > `github-copilot` > `openrouter`. To target a specific provider, use explicit format: `"openai-codex/gpt-5.2"` or `"openrouter/anthropic/claude-sonnet-4-5"`.
+**Model Resolution Order**: For each phase (scout, planner, coordinator, worker, reviewer), models are resolved in this priority:
+1. Per-call parameter (e.g., `scout: "model-name"`)
+2. Agent frontmatter `model:` field in `~/.pi/agent/agents/coordination/*.md`
+3. Pi's global `defaultModel` from `~/.pi/agent/settings.json`
+
+**Provider Resolution**: When multiple providers offer the same model ID, resolution follows provider registration order: `openai-codex` > `github-copilot` > `openrouter`. To target a specific provider, use explicit format: `"openai-codex/gpt-5.2"` or `"openrouter/anthropic/claude-sonnet-4-5"`.
 
 To disable logging, set `logPath: ""`.
 

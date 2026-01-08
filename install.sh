@@ -27,12 +27,6 @@ uninstall() {
         log "Removed extensions/coordination symlink"
     fi
     
-    # Remove agent symlinks
-    if [ -L "$PI_AGENT_DIR/agents/coordinator.md" ]; then
-        rm "$PI_AGENT_DIR/agents/coordinator.md"
-        log "Removed agents/coordinator.md symlink"
-    fi
-    
     # Remove coordination agent directory symlinks
     if [ -d "$PI_AGENT_DIR/agents/coordination" ]; then
         rm -rf "$PI_AGENT_DIR/agents/coordination"
@@ -90,18 +84,6 @@ if [ -e "$PI_AGENT_DIR/extensions/coordination" ]; then
 fi
 ln -s "$SCRIPT_DIR/extensions/coordination" "$PI_AGENT_DIR/extensions/coordination"
 log "Linked extensions/coordination"
-
-# Create coordinator agent symlink
-if [ -e "$PI_AGENT_DIR/agents/coordinator.md" ]; then
-    if [ -L "$PI_AGENT_DIR/agents/coordinator.md" ]; then
-        rm "$PI_AGENT_DIR/agents/coordinator.md"
-    else
-        warn "agents/coordinator.md exists, backing up..."
-        mv "$PI_AGENT_DIR/agents/coordinator.md" "$PI_AGENT_DIR/agents/coordinator.md.bak"
-    fi
-fi
-ln -s "$SCRIPT_DIR/agents/coordinator.md" "$PI_AGENT_DIR/agents/coordinator.md"
-log "Linked agents/coordinator.md"
 
 # Update worker.md if it exists (merge coordination section)
 if [ -e "$PI_AGENT_DIR/agents/worker.md" ]; then

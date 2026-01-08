@@ -586,14 +586,14 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 	const discovery = discoverAgents(runtime.cwd, "user");
 	const agents = discovery.agents;
 
-	const coordinatorAgent = agents.find(a => a.name === "coordinator");
+	const coordinatorAgent = agents.find(a => a.name === "coordination/coordinator");
 	if (!coordinatorAgent) {
 		delete process.env.PI_ACTIVE_COORDINATION_DIR;
 		delete process.env.PI_COORDINATION_DIR;
 		delete process.env.PI_AGENT_IDENTITY;
 		return {
 			result: {
-				content: [{ type: "text", text: "Coordinator agent not found. Create ~/.pi/agent/agents/coordinator.md" }],
+				content: [{ type: "text", text: "Coordinator agent not found. Create ~/.pi/agent/agents/coordination/coordinator.md" }],
 				isError: true,
 			},
 			coordDir,
@@ -602,7 +602,7 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 	}
 
 	const augmentedAgents: AgentConfig[] = agents.map(a => {
-		if (a.name === "coordinator") {
+		if (a.name === "coordination/coordinator") {
 			return {
 				...a,
 				tools: [...(a.tools || []), coordinatorExtensionPath],
@@ -673,12 +673,17 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 	const paramSupervisor = normalizeBoolOrObj(params.supervisor);
 
 	const defaultModel = options.defaultModel;
+	// Helper to get agent's frontmatter model
+	const getAgentModel = (name: string): string | undefined => 
+		agents.find(a => a.name === name)?.model;
+	
+	// Model resolution: param > agent frontmatter > pi's defaultModel
 	const models = {
-		scout: paramScout?.model || defaultModel,
-		planner: (paramPlanner as { model?: string })?.model || defaultModel,
-		coordinator: paramCoordinator?.model || defaultModel,
-		worker: paramWorker?.model || defaultModel,
-		reviewer: paramReviewer?.model || defaultModel,
+		scout: paramScout?.model || getAgentModel("coordination/scout") || defaultModel,
+		planner: (paramPlanner as { model?: string })?.model || getAgentModel("coordination/planner") || defaultModel,
+		coordinator: paramCoordinator?.model || getAgentModel("coordination/coordinator") || defaultModel,
+		worker: paramWorker?.model || getAgentModel("coordination/worker") || defaultModel,
+		reviewer: paramReviewer?.model || getAgentModel("coordination/reviewer") || defaultModel,
 	};
 
 	const reviewCycles = params.reviewCycles ?? settings.reviewCycles ?? 5;
@@ -1013,12 +1018,12 @@ export async function runCoordinationSession(options: CoordinationRunOptions): P
 
 			updatePhaseStatus("coordinator", "running", pipelineContext);
 			const coordAgents = pipelineConfig.models?.coordinator
-				? augmentedAgents.map(a => a.name === "coordinator" ? { ...a, model: pipelineConfig.models!.coordinator } : a)
+				? augmentedAgents.map(a => a.name === "coordination/coordinator" ? { ...a, model: pipelineConfig.models!.coordinator } : a)
 				: augmentedAgents;
 			coordinatorResult = await runSingleAgent(
 				runtime,
 				coordAgents,
-				"coordinator",
+				"coordination/coordinator",
 				task,
 				planDir,
 				undefined,

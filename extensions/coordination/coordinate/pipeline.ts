@@ -577,7 +577,7 @@ export async function runReviewPhaseWrapper(
 				await ctx.obs?.events.emit({
 					type: "task_discovered",
 					taskId: task.id,
-					discoveredBy: "code-reviewer",
+					discoveredBy: "reviewer",
 					discoveredFrom: "review",
 				});
 			}
@@ -592,7 +592,7 @@ export async function runReviewPhaseWrapper(
 		await ctx.obs?.errors.capture(err, {
 			category: "system_error",
 			severity: "error",
-			actor: "code-reviewer",
+			actor: "reviewer",
 			phase: "review",
 			spanId: span?.id || "root",
 			recoverable: false,

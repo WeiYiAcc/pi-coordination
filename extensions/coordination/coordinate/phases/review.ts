@@ -118,13 +118,13 @@ Note: Use "issues" for quick fixes that original workers can handle.
 Use "newTasks" for larger work that needs a dedicated worker (e.g., new features, architectural changes, security fixes).`;
 
 	const agentsWithOverride = config.model
-		? agents.map(a => a.name === "code-reviewer" ? { ...a, model: config.model } : a)
+		? agents.map(a => a.name === "coordination/reviewer" ? { ...a, model: config.model } : a)
 		: agents;
 
 	const result = await runSingleAgent(
 		runtime,
 		agentsWithOverride,
-		"code-reviewer",
+		"coordination/reviewer",
 		task,
 		runtime.cwd,
 		undefined,
