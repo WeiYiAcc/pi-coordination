@@ -27,7 +27,7 @@ interface DashboardState {
 
 const POLL_INTERVAL_MS = 1000;
 
-const PHASE_ORDER: PipelinePhase[] = ["scout", "planner", "coordinator", "workers", "review", "fixes", "complete", "failed"];
+const PHASE_ORDER: PipelinePhase[] = ["scout", "planner", "coordinator", "workers", "integration", "review", "fixes", "complete", "failed"];
 
 function formatDuration(ms: number): string {
 	const totalSeconds = Math.floor(ms / 1000);

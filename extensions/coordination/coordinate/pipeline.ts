@@ -18,6 +18,7 @@ import { generateProgressDoc } from "./progress.js";
 import { runScoutPhase, type ScoutConfig } from "./phases/scout.js";
 import { runPlannerPhase, createTaskQueueFromPlanner, runPlannerBackgroundReview, type PlannerPhaseConfig } from "./phases/planner.js";
 import { runReviewPhase, type ReviewConfig, type ReviewResult, type NewTaskRequest } from "./phases/review.js";
+import { runIntegrationReview, type IntegrationReviewConfig, type IntegrationReviewResult } from "./phases/integration.js";
 import { TaskQueueManager } from "./task-queue.js";
 import { runFixPhase, type FixConfig } from "./phases/fix.js";
 import { ObservabilityContext } from "./observability/index.js";
@@ -688,10 +689,104 @@ export async function runFixPhaseWrapper(
 	}
 }
 
+export async function runIntegrationReviewWrapper(
+	ctx: PipelineContext,
+	config: PipelineConfig,
+): Promise<IntegrationReviewResult> {
+	const span = ctx.obs?.spans.startSpan("phase:integration", "phase");
+
+	await ctx.obs?.events.emit({
+		type: "phase_started",
+		phase: "integration",
+	});
+
+	updatePhaseStatus("integration", "running", ctx);
+
+	try {
+		const workerStates = await ctx.storage.listWorkerStates();
+		const integrationConfig: IntegrationReviewConfig = {
+			model: config.models?.reviewer,
+			outputLimits: config.maxOutput,
+			onProgress: ctx.onUpdate,
+		};
+
+		const result = await runIntegrationReview(
+			ctx.runtime,
+			config.coordDir,
+			config.planContent,
+			workerStates,
+			integrationConfig,
+			ctx.signal,
+		);
+
+		// Track integration cost under review phase
+		ctx.costState.byPhase.review = (ctx.costState.byPhase.review || 0) + result.cost;
+		ctx.costState.total += result.cost;
+
+		await ctx.obs?.events.emit({
+			type: "phase_completed",
+			phase: "integration",
+			result: {
+				issueCount: result.issues.length,
+				allPassing: result.allPassing,
+				duration: result.duration,
+				cost: result.cost,
+			},
+		});
+
+		await saveProgressDoc(ctx);
+		span && ctx.obs?.spans.endSpan(span.id, "ok", { issueCount: result.issues.length }, { cost: result.cost });
+		updatePhaseStatus("integration", "complete", ctx);
+
+		return result;
+	} catch (err) {
+		await ctx.obs?.errors.capture(err, {
+			category: "system_error",
+			severity: "error",
+			actor: "reviewer",
+			phase: "integration",
+			spanId: span?.id || "root",
+			recoverable: false,
+		});
+		span && ctx.obs?.spans.endSpan(span.id, "error");
+		updatePhaseStatus("integration", "failed", ctx, String(err));
+		throw err;
+	}
+}
+
 export async function runReviewFixLoop(
 	ctx: PipelineContext,
 	config: PipelineConfig,
 ): Promise<void> {
+	// Check cost limit before starting review loop
+	if (await checkCostLimit(ctx)) {
+		return;
+	}
+
+	// Run integration review first (catches cross-component issues)
+	const integrationResult = await runIntegrationReviewWrapper(ctx, config);
+	
+	// If integration found issues, fix them before the regular review-fix loop
+	if (!integrationResult.allPassing && integrationResult.issues.length > 0) {
+		// Track integration issues in history
+		ctx.reviewHistory.push({
+			issues: integrationResult.issues,
+			summary: integrationResult.summary,
+			allPassing: false,
+			filesReviewed: [],
+			duration: integrationResult.duration,
+			cost: integrationResult.cost,
+		});
+
+		// Fix integration issues first
+		ctx.pipelineState.fixCycle++;
+		await runFixPhaseWrapper(ctx, config, integrationResult.issues);
+		
+		if (ctx.pipelineState.exitReason === "max_cycles") {
+			return;
+		}
+	}
+
 	while (ctx.pipelineState.fixCycle < ctx.pipelineState.maxFixCycles) {
 		if (await checkCostLimit(ctx)) {
 			return;

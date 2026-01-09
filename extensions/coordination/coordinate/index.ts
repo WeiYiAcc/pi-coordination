@@ -25,6 +25,7 @@ import {
 	renderWorkersCompact,
 	renderFileReservations,
 	renderTasksCompact,
+	renderTaskProgress,
 	renderEventLine,
 	drawBoxTop,
 	drawBoxBottom,
@@ -34,6 +35,7 @@ import {
 	type PipelineDisplayState,
 	type WorkerDisplayState,
 	type TaskDisplayState,
+	type TaskProgress,
 } from "./render-utils.js";
 
 interface CoordinationSettings {
@@ -139,6 +141,30 @@ async function writeSharedContextFile(
 	await fs.writeFile(filePath, parts.join("\n\n"), "utf-8");
 }
 
+/**
+ * Read task progress from tasks.json
+ */
+async function readTaskProgress(coordDir: string): Promise<TaskProgress | null> {
+	try {
+		const tasksPath = path.join(coordDir, "tasks.json");
+		const content = await fs.readFile(tasksPath, "utf-8");
+		const queue = JSON.parse(content);
+		const tasks = queue.tasks || [];
+		
+		return {
+			total: tasks.length,
+			completed: tasks.filter((t: any) => t.status === "complete").length,
+			active: tasks.filter((t: any) => t.status === "claimed").length,
+			// Include pending_review in pending count (discovered tasks awaiting approval)
+			pending: tasks.filter((t: any) => t.status === "pending" || t.status === "pending_review").length,
+			blocked: tasks.filter((t: any) => t.status === "blocked").length,
+			failed: tasks.filter((t: any) => t.status === "failed").length,
+		};
+	} catch {
+		return null;
+	}
+}
+
 interface WorkerInfo {
 	id: string;
 	shortId: string;
@@ -177,6 +203,7 @@ interface CoordinationDetails {
 	};
 	cost?: CostState;
 	reservations?: FileReservation[];
+	taskProgress?: TaskProgress;
 	validation?: ValidationResult;
 	async?: {
 		id: string;
@@ -201,7 +228,7 @@ const CoordinateParams = Type.Object({
 	], { description: "Worker agents: array of names or count (default: 4 workers)" })),
 	logPath: Type.Optional(Type.String({ description: "Path for coordination log output. Defaults to cwd. Set to empty string to disable." })),
 	resume: Type.Optional(Type.String({ description: "Checkpoint ID to resume from" })),
-	maxFixCycles: Type.Optional(Type.Number({ description: "Maximum review/fix cycles (default: 3)" })),
+	maxFixCycles: Type.Optional(Type.Number({ description: "Maximum review/fix cycles (default: 5)" })),
 	sameIssueLimit: Type.Optional(Type.Number({ description: "Times same issue can recur before giving up (default: 2)" })),
 	checkTests: Type.Optional(Type.Boolean({ description: "Whether reviewer should check for tests (default: true)" })),
 	async: Type.Optional(Type.Boolean({ description: "Run coordination in background (default: false)" })),
@@ -579,7 +606,7 @@ See: pi-coordination README for spec format documentation.`,
 		coordSessionId,
 		planPath,
 		hash(planContent),
-		params.maxFixCycles ?? 3,
+		params.maxFixCycles ?? 5,
 	);
 	const settings = loadCoordinationSettings();
 	const costLimit = params.costLimit ?? settings.costLimit ?? 40;
@@ -658,7 +685,7 @@ See: pi-coordination README for spec format documentation.`,
 		coordDir,
 		sessionId: coordSessionId,
 		agents: normalizeAgents(params.agents) ?? settings.agents ?? ["worker", "worker", "worker", "worker"],
-		maxFixCycles: params.maxFixCycles ?? settings.maxFixCycles ?? 3,
+		maxFixCycles: params.maxFixCycles ?? settings.maxFixCycles ?? 5,
 		sameIssueLimit: params.sameIssueLimit ?? 2,
 		checkTests: params.checkTests ?? settings.checkTests ?? true,
 		costLimit,
@@ -719,7 +746,7 @@ See: pi-coordination README for spec format documentation.`,
 		config: {
 			planPath,
 			agents: params.agents,
-			maxFixCycles: params.maxFixCycles ?? 3,
+			maxFixCycles: params.maxFixCycles ?? 5,
 			sameIssueLimit: params.sameIssueLimit ?? 2,
 			costLimit,
 			taskCount: parsedSpec.tasks.length,
@@ -774,7 +801,8 @@ See: pi-coordination README for spec format documentation.`,
 		workerStates?: WorkerStateFile[],
 		events?: CoordinationEvent[],
 		pendingAgents?: string[],
-		reservations?: FileReservation[]
+		reservations?: FileReservation[],
+		taskProgress?: TaskProgress | null,
 	): CoordinationDetails => {
 		const workers: WorkerInfo[] = (workerStates || []).map(w => ({
 			id: w.id,
@@ -814,6 +842,7 @@ See: pi-coordination README for spec format documentation.`,
 			},
 			cost: costState,
 			reservations: reservations || [],
+			taskProgress: taskProgress || undefined,
 		};
 	};
 
@@ -903,16 +932,26 @@ See: pi-coordination README for spec format documentation.`,
 			const workerStates = await storage.listWorkerStates();
 			const events = await storage.getEvents();
 			const reservations = await storage.getActiveReservations();
+			const taskProgress = await readTaskProgress(coordDir);
 
-			const aggregateCost = workerStates.reduce((sum, w) => sum + w.usage.cost, 0);
-			const currentMilestone = Math.floor(aggregateCost / 0.25) * 0.25;
+			// Update costState with real-time worker costs
+			const workerCost = workerStates.reduce((sum, w) => sum + w.usage.cost, 0);
+			costState.byPhase.workers = workerCost;
+			// Update byWorker tracking
+			for (const w of workerStates) {
+				costState.byWorker[w.id] = w.usage.cost;
+			}
+			// Calculate total from all phases (scout, planner may have run earlier)
+			costState.total = Object.values(costState.byPhase).reduce((sum, v) => sum + v, 0);
+
+			const currentMilestone = Math.floor(workerCost / 0.25) * 0.25;
 			if (currentMilestone > lastMilestoneThreshold && currentMilestone > 0) {
 				lastMilestoneThreshold = currentMilestone;
 				await storage.appendEvent({
 					type: "cost_milestone",
 					threshold: currentMilestone,
 					totals: Object.fromEntries(workerStates.map(w => [w.id, w.usage.cost])),
-					aggregate: aggregateCost,
+					aggregate: workerCost,
 					timestamp: Date.now(),
 				});
 			}
@@ -920,7 +959,7 @@ See: pi-coordination README for spec format documentation.`,
 			if (onUpdate) {
 				onUpdate({
 					content: [{ type: "text", text: "coordinating..." }],
-					details: makeCoordDetails(lastCoordResult, state, workerStates, events, normalizeAgents(params.agents), reservations),
+					details: makeCoordDetails(lastCoordResult, state, workerStates, events, normalizeAgents(params.agents), reservations, taskProgress),
 				});
 			}
 			emitProgress(state, workerStates);
@@ -933,7 +972,7 @@ See: pi-coordination README for spec format documentation.`,
 
 		const shouldRunPhase = (phase: PipelinePhase): boolean => {
 			if (!resumeFromPhase) return true;
-			const phaseOrder: PipelinePhase[] = ["scout", "planner", "coordinator", "workers", "review", "fixes", "complete"];
+			const phaseOrder: PipelinePhase[] = ["scout", "planner", "coordinator", "workers", "integration", "review", "fixes", "complete"];
 			const resumeIdx = phaseOrder.indexOf(resumeFromPhase);
 			const phaseIdx = phaseOrder.indexOf(phase);
 			return phaseIdx >= resumeIdx;
@@ -1034,10 +1073,11 @@ See: pi-coordination README for spec format documentation.`,
 		const workerStates = await storage.listWorkerStates();
 		const events = await storage.getEvents();
 		const finalReservations = await storage.getActiveReservations();
+		const finalTaskProgress = await readTaskProgress(coordDir);
 		const completedAt = Date.now();
 
 		const detailsWithPipeline: CoordinationDetails = {
-			...makeCoordDetails(coordinatorResult, finalState, workerStates, events, normalizeAgents(params.agents), finalReservations),
+			...makeCoordDetails(coordinatorResult, finalState, workerStates, events, normalizeAgents(params.agents), finalReservations, finalTaskProgress),
 			pipeline: {
 				currentPhase: pipelineState.currentPhase,
 				phases: pipelineState.phases,
@@ -1422,6 +1462,14 @@ export function createCoordinateTool(events: EventBus): ToolDefinition<typeof Co
 			if (pipelineState) {
 				const pipelineRow = renderPipelineRow(pipelineState, theme, width - 4);
 				container.addChild(new Text(drawBoxLine(pipelineRow, width, theme), 0, 0));
+			}
+
+			// Task progress bar
+			if (details.taskProgress && details.taskProgress.total > 0) {
+				const progressLines = renderTaskProgress(details.taskProgress, theme, width - 4);
+				for (const line of progressLines) {
+					container.addChild(new Text(drawBoxLine(line, width, theme), 0, 0));
+				}
 			}
 
 			// Workers section

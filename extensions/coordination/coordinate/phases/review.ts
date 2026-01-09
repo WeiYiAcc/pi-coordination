@@ -83,11 +83,19 @@ ${gitDiff}
 \`\`\`
 
 ### Review Requirements
+
+**IMPORTANT: You must use the \`read\` tool to read the full contents of each modified file.** The diff alone is not enough - you need full file context to catch integration issues.
+
+For each file in the diff, run: \`read("path/to/file.ts")\`
+
+Then verify:
 1. Does the implementation achieve what the plan specified?
 2. Any bugs, logic errors, or type issues?
-${config.checkTests ? "3. If tests should exist, do they?" : ""}
-${config.verifyPlanGoals ? "4. Verify each plan goal is met - list any unmet goals as issues." : ""}
-5. Any regressions from the plan intent?
+3. Does the new code integrate correctly with existing code in the file?
+4. Are there missing imports, exports, or dependencies?
+${config.checkTests ? "5. If tests should exist, do they?" : ""}
+${config.verifyPlanGoals ? "6. Verify each plan goal is met - list any unmet goals as issues." : ""}
+7. Any regressions from the plan intent?
 
 ### Output Format
 Return a JSON object (no markdown code fences, just raw JSON):

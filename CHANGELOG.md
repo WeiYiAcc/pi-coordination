@@ -7,6 +7,39 @@ All notable changes to pi-coordination.
 ## 2026-01-09
 
 ### Added
+- **Integration Review Phase** - New phase between workers and review-fix loop:
+  - Focuses on cross-component issues (API contracts, shared types, data flow)
+  - Short-circuits when only one worker or no files modified
+  - Issues are fixed before regular review-fix loop begins
+- **Fresh Eyes Self-Review** - Workers and reviewer do self-review before completing:
+  - Workers: First `agent_work({ action: 'complete' })` triggers fresh eyes prompt; second call completes
+  - Reviewer: Hook triggers "fresh eyes" pass after initial review until "no additional issues found"
+  - Configurable via `PI_FRESH_EYES_ENABLED` and `PI_FRESH_EYES_MAX_CYCLES` (default: 2)
+- **Task Progress Bar** - Visual progress display in coordination dashboard:
+  - Shows completion percentage with colored progress bar (warning → accent → success)
+  - Displays task counts: completed/total with active, pending, blocked, failed breakdown
+- **Worker Task Display** - Workers now show their assigned task in dashboard:
+  - Extracts task ID from worker identity (e.g., `TASK-01`)
+  - Shows truncated task title from handshake spec
+- **Fix Worker Self-Verification** - Fix workers get checklist of issues to verify:
+  - Must read files before AND after fixing
+  - Must confirm each issue is resolved before completing
+
+### Changed
+- **maxFixCycles default increased** - Changed from 3 to 5 cycles for more thorough fixing
+- **Reviewer reads full files** - Updated prompts to require `read` tool on every modified file, not just diff
+- **ReviewIssue category** - Added "integration" to category union type
+
+### Fixed
+- **Cost display showing $0.00** - `costState.total` now updated in real-time during worker execution
+- **ANSI padding in worker display** - Pad raw name before applying color (ANSI codes broke `padEnd`)
+- **Integration issues not being fixed** - Issues are now passed to fix workers, not just tracked in history
+- **Missing cost limit check** - Added check before integration review to respect cost limits
+- **Inconsistent fresh eyes defaults** - Standardized MAX_FRESH_EYES_CYCLES to 2 for both workers and reviewer
+- **Task progress in final result** - Final coordination result now includes task progress stats
+- **PHASE_ORDER consistency** - Added "integration" and "planner" to all PHASE_ORDER definitions
+
+### Added (Test Infrastructure)
 - **Test Infrastructure** - Comprehensive test helpers for coordination testing:
   - `tests/helpers/mock-worker.ts` - Simulates worker lifecycle (start, tool calls, crash, timeout, OOM)
   - `tests/helpers/mock-llm.ts` - Deterministic LLM responses for testing plan/coordinate flows

@@ -130,7 +130,7 @@ export function truncateText(text: string, maxLen: number): string {
 // Phase helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PHASE_ORDER: PipelinePhase[] = ["scout", "planner", "coordinator", "workers", "review", "fixes", "complete", "failed"];
+const PHASE_ORDER: PipelinePhase[] = ["scout", "planner", "coordinator", "workers", "integration", "review", "fixes", "complete", "failed"];
 
 export function isPhasePast(phase: PipelinePhase, currentPhase: PipelinePhase): boolean {
 	const phaseIdx = PHASE_ORDER.indexOf(phase);
@@ -155,14 +155,18 @@ export function renderPipelineRow(
 	theme: Theme,
 	width: number,
 ): string {
+	// Display phases (condensed: workers includes coordinator/fixes, review includes integration)
 	const phases: PipelinePhase[] = ["scout", "planner", "workers", "review", "complete"];
 	const parts: string[] = [];
 
 	for (const phase of phases) {
 		const result = state.phases[phase];
 		const status = result?.status;
+		// "workers" phase in display encompasses coordinator, workers, and fixes
+		// "review" phase in display encompasses integration and review
 		const isCurrent = phase === state.currentPhase || 
-			(phase === "workers" && (state.currentPhase === "coordinator" || state.currentPhase === "fixes"));
+			(phase === "workers" && (state.currentPhase === "coordinator" || state.currentPhase === "fixes")) ||
+			(phase === "review" && state.currentPhase === "integration");
 		const isPast = isPhasePast(phase, state.currentPhase);
 		const isFailed = state.currentPhase === "failed";
 
@@ -235,6 +239,7 @@ export interface WorkerDisplayState {
 	name: string; // Memorable name like "swift_fox"
 	status: string;
 	taskId?: string;
+	taskTitle?: string; // First line of handshake spec
 	tokens?: number;
 	contextPct?: number;
 	cost: number;
@@ -243,14 +248,45 @@ export interface WorkerDisplayState {
 	currentTool?: string | null;
 }
 
+/**
+ * Extract task ID from worker identity (format: worker:TASK-XX-shortid)
+ */
+function extractTaskId(identity: string): string | undefined {
+	const match = identity.match(/TASK-\d+(?:\.\d+)?/);
+	return match ? match[0] : undefined;
+}
+
+/**
+ * Extract task title from handshake spec (first meaningful line)
+ */
+function extractTaskTitle(handshakeSpec: string | undefined): string | undefined {
+	if (!handshakeSpec) return undefined;
+	// Look for first meaningful content line
+	const lines = handshakeSpec.split("\n").map(l => l.trim()).filter(l => l);
+	for (const line of lines) {
+		// Skip markdown headers like "## Task: TASK-01"
+		if (line.startsWith("## Task:")) continue;
+		if (line.startsWith("#")) continue;
+		// Skip metadata lines like "**Files:** ..."
+		if (line.startsWith("**") && line.includes(":")) continue;
+		// Skip frontmatter delimiters
+		if (line === "---") continue;
+		// Return first content line
+		return line;
+	}
+	// No meaningful content found
+	return undefined;
+}
+
 export function workerStateToDisplay(w: WorkerStateFile): WorkerDisplayState {
 	const contextTokens = w.tokens || 0;
 	return {
 		id: w.id,
 		shortId: w.shortId || w.id.slice(0, 4),
-		name: generateMemorableName(w.identity), // Use identity to match reservations
+		name: generateMemorableName(w.identity),
 		status: w.status,
-		taskId: w.currentStep ? `TASK-${String(w.currentStep).padStart(2, "0")}` : undefined,
+		taskId: extractTaskId(w.identity),
+		taskTitle: extractTaskTitle(w.handshakeSpec),
 		tokens: contextTokens,
 		contextPct: contextTokens > 0 ? Math.min(100, Math.round((contextTokens / 200000) * 100)) : undefined,
 		cost: w.usage?.cost || 0,
@@ -258,6 +294,71 @@ export function workerStateToDisplay(w: WorkerStateFile): WorkerDisplayState {
 		currentFile: w.currentFile,
 		currentTool: w.currentTool,
 	};
+}
+
+/**
+ * Render a fancy progress bar with percentage
+ * Uses Unicode block characters for smooth appearance:
+ * ████████░░░░░░░░ 50%
+ */
+export function renderProgressBar(
+	completed: number,
+	total: number,
+	theme: Theme,
+	barWidth: number = 20,
+): string {
+	if (total === 0) return theme.fg("dim", "─".repeat(barWidth));
+	
+	const pct = Math.round((completed / total) * 100);
+	const filledWidth = Math.round((completed / total) * barWidth);
+	const emptyWidth = barWidth - filledWidth;
+	
+	// Use different colors based on progress
+	let barColor: "success" | "warning" | "accent" = "accent";
+	if (pct >= 75) barColor = "success";
+	else if (pct >= 40) barColor = "accent";
+	else barColor = "warning";
+	
+	const filled = theme.fg(barColor, "█".repeat(filledWidth));
+	const empty = theme.fg("dim", "░".repeat(emptyWidth));
+	const pctStr = theme.fg(barColor, `${pct}%`.padStart(4));
+	
+	return `${filled}${empty} ${pctStr}`;
+}
+
+/**
+ * Render task progress with a visual bar
+ */
+export interface TaskProgress {
+	total: number;
+	completed: number;
+	active: number;
+	pending: number;
+	blocked: number;
+	failed: number;
+}
+
+export function renderTaskProgress(
+	progress: TaskProgress,
+	theme: Theme,
+	width: number,
+): string[] {
+	const lines: string[] = [];
+	
+	const bar = renderProgressBar(progress.completed, progress.total, theme, 20);
+	const counts = `${theme.fg("success", String(progress.completed))}${theme.fg("dim", "/")}${theme.fg("muted", String(progress.total))}`;
+	
+	const statusParts: string[] = [];
+	if (progress.active > 0) statusParts.push(theme.fg("warning", `${progress.active} active`));
+	if (progress.pending > 0) statusParts.push(theme.fg("dim", `${progress.pending} pending`));
+	if (progress.blocked > 0) statusParts.push(theme.fg("muted", `${progress.blocked} blocked`));
+	if (progress.failed > 0) statusParts.push(theme.fg("error", `${progress.failed} failed`));
+	
+	const status = statusParts.length > 0 ? theme.fg("dim", " ⟨ ") + statusParts.join(theme.fg("dim", " · ")) + theme.fg("dim", " ⟩") : "";
+	
+	lines.push(`${theme.fg("muted", "Tasks:")} ${bar}  ${counts}${status}`);
+	
+	return lines;
 }
 
 export function renderWorkersCompact(
@@ -286,23 +387,43 @@ export function renderWorkersCompact(
 
 	lines.push(`${theme.fg("muted", "Workers:")} ${summary}`);
 
-	// Active workers detail
+	// Active workers detail - show task info
 	const active = workers.filter(w => w.status === "working" || w.status === "waiting");
 	for (const w of active.slice(0, 4)) {
 		const icon = theme.fg(getStatusColor(w.status), getSpinnerFrame());
-		const name = theme.fg("accent", w.name.padEnd(13)); // Max name is 13 chars (e.g., "bright_badger")
+		// Pad raw name first, then apply color (ANSI codes break padEnd)
+		const namePadded = theme.fg("accent", w.name.padEnd(14));
 		const time = theme.fg("dim", formatDuration(w.durationMs));
 		const cost = theme.fg("muted", formatCost(w.cost));
 		const ctx = w.contextPct ? theme.fg("dim", `${w.contextPct}%`) : "";
 		
-		// Show current activity: tool + file
-		let activity = "";
-		if (w.currentTool) {
+		// Calculate remaining space for task info
+		// Base: "  " + icon(1) + " " + name(14) + " " + time(~6) + " " + cost(~6) + " " + ctx(~4)
+		const baseLen = 2 + 1 + 1 + 14 + 1 + 6 + 1 + 6 + 1 + (w.contextPct ? 4 : 0) + 1;
+		const taskSpace = Math.max(0, width - baseLen - 2);
+		
+		// Show task ID and title
+		let taskInfo = "";
+		if (w.taskId || w.taskTitle) {
+			const taskIdLen = w.taskId?.length || 0;
+			const taskId = w.taskId ? theme.fg("accent", w.taskId) : "";
+			// Reserve space for taskId + ": " separator
+			const titleSpace = taskSpace - taskIdLen - (w.taskId && w.taskTitle ? 2 : 0);
+			const title = w.taskTitle && titleSpace > 5 ? truncateText(w.taskTitle, titleSpace) : "";
+			if (taskId && title) {
+				taskInfo = `${taskId}${theme.fg("dim", ":")} ${theme.fg("muted", title)}`;
+			} else if (taskId) {
+				taskInfo = taskId;
+			} else if (title) {
+				taskInfo = theme.fg("muted", title);
+			}
+		} else if (w.currentTool) {
+			// Fallback to showing current tool if no task info
 			const file = w.currentFile ? ` ${truncateText(w.currentFile.split("/").pop() || "", 15)}` : "";
-			activity = theme.fg("dim", `${w.currentTool}${file}`);
+			taskInfo = theme.fg("dim", `${w.currentTool}${file}`);
 		}
 		
-		lines.push(`  ${icon} ${name} ${time} ${cost} ${ctx} ${activity}`);
+		lines.push(`  ${icon} ${namePadded} ${time} ${cost} ${ctx} ${taskInfo}`);
 	}
 
 	if (active.length > 4) {

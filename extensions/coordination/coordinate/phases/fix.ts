@@ -135,17 +135,38 @@ function generateFixPrompt(
 	worker: WorkerStateFile,
 	issues: ReviewIssue[],
 ): string {
+	const issueList = issues.map((i, idx) => `### Issue ${idx + 1}: ${i.file}${i.line ? `:${i.line}` : ""}
+**${i.severity}** (${i.category}): ${i.description}
+${i.suggestedFix ? `Suggested fix: ${i.suggestedFix}` : ""}
+`).join("\n");
+
 	return `## Fix Cycle
 
 You previously implemented work as part of a coordination session.
 The reviewer found these issues in your files:
 
-${issues.map(i => `### ${i.file}${i.line ? `:${i.line}` : ""}
-**${i.severity}** (${i.category}): ${i.description}
-${i.suggestedFix ? `Suggested fix: ${i.suggestedFix}` : ""}
-`).join("\n")}
+${issueList}
 
-Fix each issue. After fixing all issues, call agent_work({ action: 'complete' }).
+## Required Process
+
+For EACH issue above:
+
+1. **Read the file** to understand current state
+2. **Make the fix** addressing the specific issue
+3. **Verify your fix** by reading the file again and confirming:
+   - The specific issue is resolved
+   - No new issues were introduced
+   - The code compiles/parses correctly
+
+## Self-Verification Checklist
+
+Before completing, verify each issue:
+${issues.map((i, idx) => `- [ ] Issue ${idx + 1} (${i.file}): Fixed and verified`).join("\n")}
+
+Only call \`agent_work({ action: 'complete' })\` after you have:
+1. Fixed ALL issues listed above
+2. Verified EACH fix by reading the modified files
+3. Confirmed no regressions were introduced
 
 Your original task was:
 ${worker.handshakeSpec}

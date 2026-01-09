@@ -2,7 +2,7 @@ import type { InvariantChecker, InvariantResult, ObservabilityData } from "../ty
 import { getEventsByType } from "../loader.js";
 import type { PipelinePhase } from "../../types.js";
 
-const PHASE_ORDER: PipelinePhase[] = ["scout", "coordinator", "workers", "review", "fixes", "complete"];
+const PHASE_ORDER: PipelinePhase[] = ["scout", "planner", "coordinator", "workers", "integration", "review", "fixes", "complete"];
 
 export const phaseOrderingInvariant: InvariantChecker = {
 	name: "Phase Ordering",

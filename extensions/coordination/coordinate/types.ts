@@ -153,6 +153,7 @@ export type PipelinePhase =
 	| "planner"
 	| "coordinator"
 	| "workers"
+	| "integration"
 	| "review"
 	| "fixes"
 	| "complete"
@@ -194,7 +195,7 @@ export interface ReviewIssue {
 	file: string;
 	line?: number;
 	severity: "error" | "warning" | "suggestion";
-	category: "bug" | "logic" | "type" | "style" | "missing" | "regression";
+	category: "bug" | "logic" | "type" | "style" | "missing" | "regression" | "integration";
 	description: string;
 	suggestedFix?: string;
 	originalWorker?: string;

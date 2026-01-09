@@ -119,10 +119,30 @@ function registerWorkerEventHandlers(
 	});
 }
 
+// Fresh eyes review prompt for workers
+const FRESH_EYES_PROMPT = `Before completing, do a fresh eyes review:
+
+1. **Read each file you modified** using the read tool
+2. **Review your changes** looking for:
+   - Obvious bugs or logic errors
+   - Missing error handling
+   - Typos or syntax issues
+   - Incomplete implementations
+   - Inconsistencies with existing code patterns
+
+3. **If you find issues**: Fix them now, then try completing again
+4. **If no issues found**: Call agent_work({ action: 'complete' }) again with your result
+
+Take your time - this self-review catches many bugs before the formal review phase.`;
+
+// Max fresh eyes cycles to prevent infinite loops (default: 2)
+const MAX_FRESH_EYES_CYCLES = parseInt(process.env.PI_FRESH_EYES_MAX_CYCLES || "2", 10);
+
 export function registerWorkerTools(pi: ExtensionAPI): void {
 	const coordDir = process.env.PI_COORDINATION_DIR;
 	const identity = process.env.PI_AGENT_IDENTITY;
 	const workerId = process.env.PI_WORKER_ID;
+	const freshEyesEnabled = process.env.PI_FRESH_EYES_ENABLED !== "false"; // Enabled by default
 
 	if (!coordDir || !identity || !workerId) {
 		throw new Error("Worker tools require PI_COORDINATION_DIR, PI_AGENT_IDENTITY, and PI_WORKER_ID environment variables");
@@ -137,6 +157,7 @@ export function registerWorkerTools(pi: ExtensionAPI): void {
 		return obs;
 	};
 	let lastMessageCheck = Date.now();
+	let freshEyesCycleCount = 0; // Track fresh eyes review cycles
 
 	registerWorkerEventHandlers(pi, storage, identity, workerId);
 
@@ -549,6 +570,20 @@ export function registerWorkerTools(pi: ExtensionAPI): void {
 
 				// Complete task
 				if (params.action === "complete") {
+					// Fresh eyes review gate - require self-review before completing
+					if (freshEyesEnabled && freshEyesCycleCount < MAX_FRESH_EYES_CYCLES) {
+						freshEyesCycleCount++;
+						
+						if (freshEyesCycleCount === 1) {
+							// First completion attempt - trigger fresh eyes review
+							return {
+								content: [{ type: "text", text: FRESH_EYES_PROMPT }],
+								details: { freshEyesReview: true, cycle: freshEyesCycleCount },
+							};
+						}
+						// Subsequent attempts allowed through (they've done at least one review)
+					}
+
 					await storage.updateWorkerState(workerId, (w) => ({
 						...w,
 						status: "complete",
