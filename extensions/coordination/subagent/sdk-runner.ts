@@ -444,15 +444,11 @@ async function getModelRegistry(): Promise<any> {
 
 	modelRegistryInitPromise = (async () => {
 		try {
-			const {
-				discoverModels,
-				discoverAuthStorage,
-				getDefaultAgentDir,
-			} = await import("@mariozechner/pi-coding-agent");
+			const { discoverModels, discoverAuthStorage } = await import("@mariozechner/pi-coding-agent");
 
-			const agentDir = getDefaultAgentDir();
-			const authStorage = discoverAuthStorage(agentDir);
-			cachedModelRegistry = discoverModels(authStorage, agentDir);
+			// Both functions use getDefaultAgentDir() internally as default parameter
+			const authStorage = discoverAuthStorage();
+			cachedModelRegistry = discoverModels(authStorage);
 			return cachedModelRegistry;
 		} catch (err) {
 			// Clear the promise so future calls can retry
