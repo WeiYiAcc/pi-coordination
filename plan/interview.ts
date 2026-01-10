@@ -17,11 +17,12 @@
  * @module
  */
 
+import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { AgentRuntime } from "../subagent/runner.js";
 import { discoverAgents } from "../subagent/agents.js";
 import { runSingleAgent } from "../subagent/runner.js";
 import {
-	runInlineQuestionsTUI,
+	InlineQuestionsComponent,
 	type Answer,
 	type InlineQuestionsTUIResult,
 } from "../coordinate/inline-questions-tui.js";
@@ -317,6 +318,7 @@ export async function runInterview(
 	runtime: AgentRuntime,
 	input: string,
 	config: InterviewConfig = {},
+	ctx?: Pick<ExtensionContext, "hasUI" | "ui">,
 ): Promise<InterviewResult> {
 	const startTime = Date.now();
 	const {
@@ -330,11 +332,11 @@ export async function runInterview(
 	let totalCost = 0;
 	const rounds: InterviewRound[] = [];
 
-	// Non-TTY fallback: skip interview, use input as-is
-	if (!process.stdin.isTTY || !process.stdout.isTTY) {
+	// Non-TTY or no UI context fallback: skip interview, use input as-is
+	if (!process.stdin.isTTY || !process.stdout.isTTY || !ctx?.hasUI) {
 		return {
 			collectedInfo: { originalInput: input },
-			transcript: `Original request:\n${input}\n\n(Interview skipped - non-TTY environment)`,
+			transcript: `Original request:\n${input}\n\n(Interview skipped - non-interactive environment)`,
 			totalRounds: 0,
 			wasAborted: false,
 			cost: 0,
@@ -374,11 +376,18 @@ export async function runInterview(
 		};
 	}
 
-	const discoveryResult = await runInlineQuestionsTUI({
-		questions: discoveryQuestions,
-		timeout,
-		signal,
-	});
+	// Use pi-tui overlay for questions
+	const discoveryResult = await ctx.ui.custom<InlineQuestionsTUIResult>(
+		(tui, _theme, _kb, done) => {
+			return new InlineQuestionsComponent(
+				discoveryQuestions,
+				timeout,
+				() => tui.requestRender(),
+				done,
+			);
+		},
+		{ overlay: true },
+	);
 
 	if (discoveryResult.skippedAll) {
 		return {
@@ -401,6 +410,11 @@ export async function runInterview(
 	// Subsequent rounds: LLM decides what's needed
 	let needsNewScout = false;
 	for (let round = 1; round < maxRounds; round++) {
+		// Check if aborted between rounds
+		if (signal?.aborted) {
+			break;
+		}
+
 		const analysis = await analyzeInterviewState(
 			runtime,
 			rounds,
@@ -418,11 +432,18 @@ export async function runInterview(
 			break;
 		}
 
-		const result = await runInlineQuestionsTUI({
-			questions: analysis.nextQuestions,
-			timeout,
-			signal,
-		});
+		// Use pi-tui overlay for subsequent rounds
+		const result = await ctx.ui.custom<InlineQuestionsTUIResult>(
+			(tui, _theme, _kb, done) => {
+				return new InlineQuestionsComponent(
+					analysis.nextQuestions,
+					timeout,
+					() => tui.requestRender(),
+					done,
+				);
+			},
+			{ overlay: true },
+		);
 
 		if (result.skippedAll) {
 			break; // User wants to proceed with what we have

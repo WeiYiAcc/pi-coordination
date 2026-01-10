@@ -77,6 +77,12 @@ export default function enforceJson(pi: ExtensionAPI): void {
 	let retryCount = 0;
 
 	pi.on("agent_end", async (event, ctx) => {
+		// Only run for agents that should output JSON (reviewer, planner)
+		const agentIdentity = process.env.PI_AGENT_IDENTITY;
+		if (agentIdentity && !agentIdentity.includes("reviewer") && !agentIdentity.includes("planner")) {
+			return; // Not an agent that outputs JSON, skip
+		}
+
 		const text = extractTextFromMessages(event.messages);
 		const jsonText = extractJSON(text);
 

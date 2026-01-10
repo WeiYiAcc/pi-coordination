@@ -19,8 +19,8 @@ import {
 } from "../test-utils.js";
 
 // Import the spec parser and validator
-import { parseSpec } from "../../extensions/coordination/coordinate/spec-parser.js";
-import { validateSpec, formatValidationResult } from "../../extensions/coordination/coordinate/spec-validator.js";
+import { parseSpec } from "../../coordinate/spec-parser.js";
+import { validateSpec, formatValidationResult } from "../../coordinate/spec-validator.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Setup

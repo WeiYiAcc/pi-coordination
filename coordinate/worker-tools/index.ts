@@ -100,6 +100,8 @@ function registerWorkerEventHandlers(
 						usage: {
 							input: state.usage.input + usage.input,
 							output: state.usage.output + usage.output,
+							cacheRead: (state.usage.cacheRead || 0) + (usage.cacheRead || 0),
+							cacheWrite: (state.usage.cacheWrite || 0) + (usage.cacheWrite || 0),
 							cost: state.usage.cost + usage.cost.total,
 							turns: state.usage.turns + 1,
 						},

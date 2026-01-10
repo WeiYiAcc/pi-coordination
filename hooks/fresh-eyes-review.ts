@@ -93,6 +93,12 @@ export default function freshEyesReview(pi: ExtensionAPI): void {
 	let hasTriggeredFreshEyes = false;
 
 	pi.on("agent_end", async (event) => {
+		// Only run for reviewer agent
+		const agentIdentity = process.env.PI_AGENT_IDENTITY;
+		if (agentIdentity && !agentIdentity.includes("reviewer")) {
+			return; // Not a reviewer agent, skip
+		}
+
 		// Only trigger once per session, after the initial review
 		if (cycleCount >= MAX_CYCLES) {
 			return;

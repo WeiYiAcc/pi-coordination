@@ -176,7 +176,7 @@ interface WorkerInfo {
 	waitingFor: { identity: string; item: string } | null;
 	startedAt: number;
 	completedAt: number | null;
-	usage: { input: number; output: number; cost: number; turns: number };
+	usage: { input: number; output: number; cacheRead?: number; cacheWrite?: number; cost: number; turns: number };
 	filesModified: string[];
 	toolCount?: number;
 	tokens?: number;

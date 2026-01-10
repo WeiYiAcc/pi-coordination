@@ -19,7 +19,7 @@ import {
 } from "../test-utils.js";
 
 // Import the spec parser
-import { parseSpec, TASK_ID_PATTERNS } from "../../extensions/coordination/coordinate/spec-parser.js";
+import { parseSpec, TASK_ID_PATTERNS } from "../../coordinate/spec-parser.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Setup

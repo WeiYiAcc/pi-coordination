@@ -26,12 +26,10 @@ import { structureTasks, type StructureResult } from "./structure.js";
 import {
 	runHandoff,
 	resolveSpecPath,
-	formatSpecSummary,
 	type HandoffResult,
 	type HandoffChoice,
 } from "./handoff.js";
-import { parseSpec, serializeSpec, type Spec } from "../coordinate/spec-parser.js";
-import { validateSpec, formatValidationResult } from "../coordinate/spec-validator.js";
+import { parseSpec, type Spec } from "../coordinate/spec-parser.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tool Parameters
@@ -95,14 +93,14 @@ interface PlanOptions {
 	params: PlanParamsType;
 	signal?: AbortSignal;
 	onUpdate?: (partial: AgentToolResult<PlanDetails>) => void;
-	toolCtx?: Pick<ExtensionContext, "hasPendingMessages" | "abort">;
+	ctx?: ExtensionContext;
 }
 
 async function runPlan(
 	runtime: PlanRuntime,
 	options: PlanOptions,
 ): Promise<AgentToolResult<PlanDetails>> {
-	const { params, signal, onUpdate } = options;
+	const { params, signal, onUpdate, ctx } = options;
 	const startTime = Date.now();
 
 	const costs = {
@@ -183,7 +181,7 @@ async function runPlan(
 			model: params.model,
 			signal,
 			mode: isRefineMode ? "refine" : "new",
-		});
+		}, ctx);
 
 		costs.interview = interviewResult.cost;
 		costs.total += interviewResult.cost;
@@ -282,7 +280,7 @@ async function runPlan(
 	const handoffResult = await runHandoff(structureResult.spec, specPath, {
 		signal,
 		autoSave: true,
-	});
+	}, ctx);
 
 	const details: PlanDetails = {
 		specPath,
@@ -354,10 +352,7 @@ export function createPlanTool(events: EventBus): ToolDefinition<typeof PlanPara
 					params: params as PlanParamsType,
 					signal,
 					onUpdate,
-					toolCtx: {
-						hasPendingMessages: () => ctx.hasPendingMessages(),
-						abort: () => ctx.abort(),
-					},
+					ctx,
 				},
 			);
 			return result;

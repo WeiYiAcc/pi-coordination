@@ -261,6 +261,7 @@ To disable logging, set `logPath: ""` or use `PI_COORDINATION_LOG_DIR` env var.
 | **validate** | Strict TASK-XX format validation |
 | **coordinator** | Spawns workers from task queue, manages supervisor loop |
 | **workers** | Parallel execution of tasks with self-review |
+| **integration** | Cross-component review (API contracts, shared types, data flow) |
 | **review** | Code reviewer checks all changes against plan goals |
 | **fixes** | Same workers fix issues found in review |
 | **complete** | All done, generate final report |
@@ -407,7 +408,7 @@ From interview: prefer httpOnly cookies, need refresh tokens.
 
 **Pipeline Timeline:**
 ```
-Pipeline: [scout] -> [planner] -> [coordinator] -> [workers] -> [review] -> [fixes] -> [complete]
+Pipeline: [scout] -> [planner] -> [coordinator] -> [workers] -> [integration] -> [review] -> [fixes] -> [complete]
 Current: workers
 Cost: $0.45 / $40.00 limit
 ```
@@ -439,7 +440,7 @@ For async coordination jobs, use the `/jobs` command to open a full-screen dashb
 
 ```
 ─ Coordination ──────────────────────────────────────────────────────────
-Pipeline: [scout ✓] → [planner ✓] → [workers ●] → [review] → [complete]
+Pipeline: [scout ✓] → [planner ✓] → [workers ●] → [integration] → [review] → [complete]
 Cost: $1.23 / $40.00 limit                             Elapsed: 3m 45s
 ─ Task Queue (6) ────────────────────────────────────────────────────────
 ● task-1    Create user types         claimed     swift_fox
@@ -579,6 +580,9 @@ After each session, a markdown log is saved containing:
 │  │   ├── Self-review before completion                              │
 │  │   ├── Can request subtasks (TASK-XX.Y)                           │
 │  │   └── Signal contracts when ready                                │
+│  │                                                                  │
+│  ├── [Integration Phase] - Cross-component review                   │
+│  │   └── API contracts, shared types, data flow issues              │
 │  │                                                                  │
 │  ├── [Review Phase] - Code reviewer checks changes                  │
 │  │   └── Returns issues with file, line, severity                   │

@@ -125,7 +125,7 @@ export class MockAgentSession {
 				output: usage.output || 50,
 				cacheRead: usage.cacheRead || 0,
 				cacheWrite: usage.cacheWrite || 0,
-				totalTokens: (usage.input || 100) + (usage.output || 50),
+				totalTokens: (usage.input || 100) + (usage.output || 50) + (usage.cacheRead || 0) + (usage.cacheWrite || 0),
 				cost: { total: usage.cost || 0.001 },
 			},
 		} as AgentMessage;

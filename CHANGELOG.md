@@ -6,6 +6,34 @@ All notable changes to pi-coordination.
 
 ## 2026-01-09
 
+### Fixed
+- **TUI flickering/crash in plan tool** - Multiple fixes to inline-questions-tui.ts:
+  - Fixed ANSI dim() not called as function (`${dim}` → `${dim(truncatedContext)}`)
+  - Timer reset now uses stored `this.timeout` instance var (was using constant)
+  - Empty questions array guard in constructor (calls done via queueMicrotask)
+  - Guards in `render()` and `handleInput()` for empty array race condition
+  - Confirm type now respects `default: false` in constructor and resetForNextQuestion
+  - Up arrow with no options no longer causes invalid state (checks optionCount > 0)
+  - Minimum width enforcement prevents RangeError on narrow terminals (`Math.max(40, ...)`)
+  - Negative inputWidth guards prevent crashes (`Math.max(1, ...)` for custom/text fields)
+  - Confirm type padding calculation fixed (`w - 25` for correct box alignment)
+  - Text input type box alignment fixed (`inputWidth = w - 7`, `padding = inputWidth - displayText.length`)
+- **Hook interference between agents** - Added PI_AGENT_IDENTITY checks:
+  - `fresh-eyes-review.ts` now only runs for reviewer agent
+  - `enforce-scout-format.ts` now only runs for scout agent
+  - `enforce-json.ts` already had check (reviewer/planner only)
+- **plan/interview.ts** - Added signal check between interview rounds (respects abort)
+- **plan/handoff.ts** - Consolidated duplicate TTY checks
+- **plan/index.ts** - Removed unused imports (formatSpecSummary, serializeSpec, validateSpec)
+- **hooks/enforce-scout-format.ts** - Removed unused ctx parameter
+- **Token counting missing cache tokens** - Fixed total token calculations to include all four types:
+  - `coordinate/types.ts` - Added optional `cacheRead`/`cacheWrite` to WorkerStateFile.usage
+  - `coordinate/dashboard.ts` - Fixed totalTokens calculation, now shows cache info when present
+  - `coordinate/coordinator-tools/index.ts` - Worker state updates now include cache tokens
+  - `coordinate/worker-tools/index.ts` - Turn end usage updates now accumulate cache tokens
+  - `coordinate/index.ts` - Updated CoordinatorStateFile.usage type
+  - `tests/helpers/mock-sdk.ts` - Fixed mock totalTokens calculation
+
 ### Added
 - **Integration Review Phase** - New phase between workers and review-fix loop:
   - Focuses on cross-component issues (API contracts, shared types, data flow)

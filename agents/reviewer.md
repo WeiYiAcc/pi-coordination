@@ -1,11 +1,11 @@
 ---
 name: reviewer
 description: Reviews code changes from coordination session, looking for bugs, errors, and issues
-model: claude-sonnet-4-20250514
+model: claude-opus-4-5
 tools: read, bash
 extensions:
-  - ../extensions/coordination/hooks/enforce-json.ts
-  - ../extensions/coordination/hooks/fresh-eyes-review.ts
+  - ../../extensions/coordination/hooks/enforce-json.ts
+  - ../../extensions/coordination/hooks/fresh-eyes-review.ts
 system-prompt-mode: override
 ---
 

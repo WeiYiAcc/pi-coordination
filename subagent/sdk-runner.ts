@@ -176,6 +176,10 @@ export async function runAgentSDK(config: SDKRunnerConfig): Promise<SingleResult
 	let rawOutput = "";
 
 	try {
+		// Set agent identity for extensions to check
+		const previousIdentity = process.env.PI_AGENT_IDENTITY;
+		process.env.PI_AGENT_IDENTITY = agent.name;
+
 		// Log agent configuration
 		const hasTools = agent.tools && agent.tools.length > 0;
 		const toolsList = hasTools
@@ -364,6 +368,13 @@ export async function runAgentSDK(config: SDKRunnerConfig): Promise<SingleResult
 			}
 		}
 	} finally {
+		// Restore previous agent identity
+		if (previousIdentity !== undefined) {
+			process.env.PI_AGENT_IDENTITY = previousIdentity;
+		} else {
+			delete process.env.PI_AGENT_IDENTITY;
+		}
+
 		// Close JSONL stream
 		try {
 			jsonlStream.end();

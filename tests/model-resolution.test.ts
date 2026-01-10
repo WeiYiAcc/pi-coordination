@@ -7,7 +7,7 @@
  * Run with: npx jiti tests/model-resolution.test.ts
  */
 
-import { discoverAgents, type AgentConfig } from "../extensions/coordination/subagent/agents.js";
+import { discoverAgents, type AgentConfig } from "../subagent/agents.js";
 import { TestRunner, assertEqual } from "./test-utils.js";
 
 async function main() {

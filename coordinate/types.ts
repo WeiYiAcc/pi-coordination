@@ -93,6 +93,8 @@ export interface WorkerStateFile {
 	usage: {
 		input: number;
 		output: number;
+		cacheRead?: number;
+		cacheWrite?: number;
 		cost: number;
 		turns: number;
 	};

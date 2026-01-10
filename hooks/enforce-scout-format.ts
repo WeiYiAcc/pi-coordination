@@ -102,7 +102,13 @@ function validateScoutFormat(text: string): ScoutFormatValidation {
 export default function enforceScoutFormat(pi: ExtensionAPI): void {
 	let retryCount = 0;
 
-	pi.on("agent_end", async (event, ctx) => {
+	pi.on("agent_end", async (event) => {
+		// Only run for scout agent - check agent identity from env
+		const agentIdentity = process.env.PI_AGENT_IDENTITY;
+		if (agentIdentity && !agentIdentity.includes("scout")) {
+			return; // Not a scout agent, skip validation
+		}
+
 		const text = extractTextFromMessages(event.messages);
 		const validation = validateScoutFormat(text);
 

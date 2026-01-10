@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Creates task graphs from plans with verification and self-review
-model: claude-sonnet-4-20250514
+model: claude-opus-4-5
 tools: read, bash
 system-prompt-mode: override
 ---

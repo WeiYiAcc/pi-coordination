@@ -282,6 +282,8 @@ export function spawnWorkerProcess(
 			usage: {
 				input: tokenTotals.input,
 				output: tokenTotals.output,
+				cacheRead: tokenTotals.cacheRead,
+				cacheWrite: tokenTotals.cacheWrite,
 				cost: costTotal,
 				turns,
 			},

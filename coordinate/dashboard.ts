@@ -674,8 +674,10 @@ export class CoordinationDashboard implements Component {
 		addLine(`  ${th.fg("dim", "Cost:")} ${formatCost(w.usage?.cost || 0)}`);
 		addLine(`  ${th.fg("dim", "Turns:")} ${w.usage?.turns || 0}`);
 
-		const totalTokens = (w.usage?.input || 0) + (w.usage?.output || 0);
-		addLine(`  ${th.fg("dim", "Tokens:")} ${totalTokens.toLocaleString()} (in: ${(w.usage?.input || 0).toLocaleString()} / out: ${(w.usage?.output || 0).toLocaleString()})`);
+		const totalTokens = (w.usage?.input || 0) + (w.usage?.output || 0) + (w.usage?.cacheRead || 0) + (w.usage?.cacheWrite || 0);
+		const cacheTokens = (w.usage?.cacheRead || 0) + (w.usage?.cacheWrite || 0);
+		const cacheInfo = cacheTokens > 0 ? ` / cache: ${cacheTokens.toLocaleString()}` : "";
+		addLine(`  ${th.fg("dim", "Tokens:")} ${totalTokens.toLocaleString()} (in: ${(w.usage?.input || 0).toLocaleString()} / out: ${(w.usage?.output || 0).toLocaleString()}${cacheInfo})`);
 
 		if (w.filesModified && w.filesModified.length > 0) {
 			addLine("");
@@ -1337,7 +1339,7 @@ export class MiniDashboard implements Component {
 				cost: costState?.total || 0,
 				elapsed: formatDuration(Date.now() - startedAt),
 				workers: workers.map(w => {
-					const tokens = w.tokens ?? (w.usage ? w.usage.input + w.usage.output : undefined);
+					const tokens = w.tokens ?? (w.usage ? w.usage.input + w.usage.output + (w.usage.cacheRead || 0) + (w.usage.cacheWrite || 0) : undefined);
 					const contextWindow = defaultContextWindow;
 					const contextPct = tokens !== undefined ? (tokens / contextWindow) * 100 : undefined;
 					
