@@ -203,9 +203,9 @@ export async function runAgentSDK(config: SDKRunnerConfig): Promise<SingleResult
 
 	let rawOutput = "";
 
+	// Set agent identity for extensions to check (declared outside try so finally can see it)
+	const previousIdentity = process.env.PI_AGENT_IDENTITY;
 	try {
-		// Set agent identity for extensions to check
-		const previousIdentity = process.env.PI_AGENT_IDENTITY;
 		process.env.PI_AGENT_IDENTITY = agent.name;
 
 		// Log agent configuration

@@ -166,7 +166,6 @@ export function spawnWorkerProcess(
 	}).catch(() => {});
 
 	const traceId = obs?.getTraceId() || process.env.PI_TRACE_ID;
-	const runtimeConfig = loadRuntimeConfig(coordDir);
 
 	const proc = spawn("pi", args, {
 		cwd,

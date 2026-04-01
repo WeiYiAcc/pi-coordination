@@ -82,7 +82,7 @@ if [ -e "$PI_AGENT_DIR/extensions/coordination" ]; then
         error "extensions/coordination exists and is not a symlink. Please remove it first."
     fi
 fi
-ln -s "$SCRIPT_DIR/extensions/coordination" "$PI_AGENT_DIR/extensions/coordination"
+ln -s "$SCRIPT_DIR" "$PI_AGENT_DIR/extensions/coordination"
 log "Linked extensions/coordination"
 
 # Update worker.md if it exists (merge coordination section)

@@ -38,7 +38,7 @@ function formatDuration(ms: number): string {
 }
 
 function formatCost(cost: number): string {
-	return `$${cost.toFixed(2)}`;
+	return `$${(cost ?? 0).toFixed(2)}`;
 }
 
 function padToWidth(str: string, targetWidth: number): string {

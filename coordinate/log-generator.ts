@@ -138,7 +138,7 @@ export function generateCoordinationLog(data: LogData): string {
 			? w.filesModified.map(f => `\`${path.basename(f)}\``).join(", ")
 			: "--";
 		
-		lines.push(`| ${w.identity} | ${statusIcon} | ${wDuration} | $${w.usage.cost.toFixed(4)} | ${w.usage.turns} | ${files} |`);
+		lines.push(`| ${w.identity} | ${statusIcon} | ${wDuration} | $${(w.usage?.cost ?? 0).toFixed(4)} | ${w.usage?.turns ?? 0} | ${files} |`);
 	}
 	lines.push(``);
 
