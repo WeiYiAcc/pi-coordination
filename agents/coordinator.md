@@ -1,7 +1,7 @@
 ---
 name: coordinator
 description: Coordinates parallel workers to execute plans with dependency management
-model: claude-opus-4-5
+model: sub2api/claude-opus-4-6
 tools: read, bash
 system-prompt-mode: override
 ---

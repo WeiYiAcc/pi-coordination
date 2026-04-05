@@ -563,11 +563,15 @@ async function getModelRegistry(): Promise<any> {
 
 	modelRegistryInitPromise = (async () => {
 		try {
-			const { discoverModels, discoverAuthStorage } = await import("@mariozechner/pi-coding-agent");
+			const sdk = await import("@mariozechner/pi-coding-agent");
 
-			// Both functions use getDefaultAgentDir() internally as default parameter
-			const authStorage = discoverAuthStorage();
-			cachedModelRegistry = discoverModels(authStorage);
+			// pi ≥0.65: discoverAuthStorage/discoverModels removed; use class API
+			const authStorage = (sdk as any).AuthStorage?.create?.()
+				?? (sdk as any).discoverAuthStorage?.();
+			const registry = (sdk as any).ModelRegistry?.create?.(authStorage)
+				?? (sdk as any).discoverModels?.(authStorage);
+			if (registry?.reload) await registry.reload();
+			cachedModelRegistry = registry;
 			return cachedModelRegistry;
 		} catch (err) {
 			// Clear the promise so future calls can retry
