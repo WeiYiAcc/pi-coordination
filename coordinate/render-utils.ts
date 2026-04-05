@@ -110,7 +110,7 @@ export function formatDuration(ms: number): string {
 }
 
 export function formatCost(cost: number): string {
-	return `$${cost.toFixed(2)}`;
+	return `$${(cost ?? 0).toFixed(2)}`;
 }
 
 export function formatContextUsage(tokens: number, maxTokens = 200000): string {

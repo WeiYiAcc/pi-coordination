@@ -82,7 +82,7 @@ export function generateCoordinationLog(data: LogData): string {
 	lines.push(`**Status:** ${state.status === "complete" ? "Completed" : state.status}`);
 	lines.push(`**Started:** ${formatTimestamp(startedAt)}`);
 	lines.push(`**Duration:** ${formatDuration(duration)}`);
-	lines.push(`**Total Cost:** $${totalCost.toFixed(4)}`);
+	lines.push(`**Total Cost:** $${(totalCost ?? 0).toFixed(4)}`);
 	lines.push(`**Workers:** ${successCount}/${workerStates.length} succeeded${failedCount > 0 ? `, ${failedCount} failed` : ""}`);
 	lines.push(``);
 
@@ -188,16 +188,16 @@ export function generateCoordinationLog(data: LogData): string {
 				line += `[${ev.workerId.slice(0, 8)}] Received "${ev.item}" from ${ev.from}`;
 				break;
 			case "cost_milestone":
-				line += `**Cost milestone:** $${ev.aggregate.toFixed(2)}`;
+				line += `**Cost milestone:** $${(ev.aggregate ?? 0).toFixed(2)}`;
 				break;
 			case "coordinator":
 				line += `[coordinator] ${ev.message}`;
 				break;
 			case "phase_complete":
-				line += `**Phase ${ev.phase} complete** (${formatDuration(ev.duration)}, $${ev.cost.toFixed(2)})`;
+				line += `**Phase ${ev.phase} complete** (${formatDuration(ev.duration)}, $${(ev.cost ?? 0).toFixed(2)})`;
 				break;
 			case "cost_limit_reached":
-				line += `**Cost limit reached:** $${ev.total.toFixed(2)}`;
+				line += `**Cost limit reached:** $${(ev.total ?? 0).toFixed(2)}`;
 				break;
 		}
 
@@ -255,7 +255,7 @@ export function generateCoordinationLog(data: LogData): string {
 			lines.push(`- **All Passing:** ${review.allPassing ? "Yes" : "No"}`);
 			lines.push(`- **Summary:** ${review.summary}`);
 			lines.push(`- **Duration:** ${formatDuration(review.duration)}`);
-			lines.push(`- **Cost:** $${review.cost.toFixed(4)}`);
+			lines.push(`- **Cost:** $${(review.cost ?? 0).toFixed(4)}`);
 			lines.push(``);
 
 			if (review.issues.length > 0) {
@@ -284,7 +284,7 @@ export function generateCoordinationLog(data: LogData): string {
 	if (costState) {
 		lines.push(`## Cost Breakdown`);
 		lines.push(``);
-		lines.push(`**Total:** $${costState.total.toFixed(4)}`);
+		lines.push(`**Total:** $${(costState.total ?? 0).toFixed(4)}`);
 		lines.push(``);
 
 		if (Object.keys(costState.byPhase).length > 0) {
