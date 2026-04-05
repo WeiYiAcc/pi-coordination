@@ -93,23 +93,28 @@ export async function runSingleAgent(
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 	if (agent.model) args.push("--model", agent.model);
 	
-	if (agent.tools && agent.tools.length > 0) {
-		const builtinTools: string[] = [];
-		const extensionPaths: string[] = [];
+	if (agent.tools) {
+		if (agent.tools.length === 0) {
+			// Explicitly disable all tools when tools: [] is set
+			args.push("--no-tools");
+		} else {
+			const builtinTools: string[] = [];
+			const extensionPaths: string[] = [];
 
-		for (const t of agent.tools) {
-			if (t.includes("/") || t.endsWith(".ts") || t.endsWith(".js")) {
-				extensionPaths.push(t);
-			} else {
-				builtinTools.push(t);
+			for (const t of agent.tools) {
+				if (t.includes("/") || t.endsWith(".ts") || t.endsWith(".js")) {
+					extensionPaths.push(t);
+				} else {
+					builtinTools.push(t);
+				}
 			}
-		}
 
-		if (builtinTools.length > 0) {
-			args.push("--tools", builtinTools.join(","));
-		}
-		for (const extPath of extensionPaths) {
-			args.push("--extension", extPath);
+			if (builtinTools.length > 0) {
+				args.push("--tools", builtinTools.join(","));
+			}
+			for (const extPath of extensionPaths) {
+				args.push("--extension", extPath);
+			}
 		}
 	}
 

@@ -258,8 +258,10 @@ export async function runAgentSDK(config: SDKRunnerConfig): Promise<SingleResult
 					? systemPrompt
 					: (defaultPrompt: string) => `${defaultPrompt}\n\n${systemPrompt}`
 				: undefined,
-			// Tool configuration - empty array means no discovery, but we need built-in tools
-			...(builtinTools.length > 0 ? { tools: await resolveBuiltinTools(builtinTools, cwd) } : {}),
+			// Tool configuration: explicit tools array → resolve them; empty array → disable all tools
+			...(agent.tools
+				? { tools: builtinTools.length > 0 ? await resolveBuiltinTools(builtinTools, cwd) : [] }
+				: {}),
 			// Extension paths (skip discovery if explicitly configured)
 			...(extensionPaths.length > 0 ? { additionalExtensionPaths: extensionPaths } : {}),
 			// Inline extension factories (passed directly, no file loading)
